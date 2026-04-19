@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: PHP ${{ matrix.php }} / ${{ matrix.deps }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
+        deps: [highest]
+        include:
+          - php: '8.4'
+            deps: lowest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, json, libxml, mbstring
+          coverage: none
+
+      - name: Install PHP dependencies
+        uses: ramsey/composer-install@v3
+        with:
+          dependency-versions: ${{ matrix.deps }}
+
+      - name: Mago format check
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1 format --check
+
+      - name: Mago lint
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1 lint --reporting-format=github
+
+      - name: Mago analyze
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1 analyze --reporting-format=github
+
+      - name: Tests
+        run: composer test
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, json, libxml, mbstring
+          coverage: pcov
+
+      - name: Install PHP dependencies
+        uses: ramsey/composer-install@v3
+
+      - name: Run tests with coverage
+        run: composer test:coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: build/coverage/clover.xml
+          fail_ci_if_error: false
+
+  mutation:
+    name: Mutation testing
+    runs-on: ubuntu-latest
+    # Runs on main-branch pushes only; ~70s per run, too slow for per-PR blocking.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, json, libxml, mbstring
+          coverage: pcov
+
+      - name: Install PHP dependencies
+        uses: ramsey/composer-install@v3
+
+      - name: Run Infection
+        run: composer mutate

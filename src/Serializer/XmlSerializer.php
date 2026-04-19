@@ -1,0 +1,998 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Prov\Serializer;
+
+use Prov\Activity;
+use Prov\Agent;
+use Prov\Attribute\Attributes;
+use Prov\Attribute\Literal;
+use Prov\Bundle;
+use Prov\Document;
+use Prov\Entity;
+use Prov\Exception\DeserializationException;
+use Prov\Identifier\NamespaceManager;
+use Prov\Identifier\ProvNamespace;
+use Prov\Identifier\QualifiedName;
+use Prov\Model\ProvRecord;
+use Prov\Model\ProvRelation;
+use Prov\Model\RelationMetadata;
+use Prov\Relation\Alternate;
+use Prov\Relation\Association;
+use Prov\Relation\Attribution;
+use Prov\Relation\Communication;
+use Prov\Relation\Delegation;
+use Prov\Relation\Derivation;
+use Prov\Relation\Dictionary\DictionaryEntry;
+use Prov\Relation\Dictionary\DictionaryInsertion;
+use Prov\Relation\Dictionary\DictionaryMembership;
+use Prov\Relation\Dictionary\DictionaryRemoval;
+use Prov\Relation\End;
+use Prov\Relation\Generation;
+use Prov\Relation\Influence;
+use Prov\Relation\Invalidation;
+use Prov\Relation\Membership;
+use Prov\Relation\Mention;
+use Prov\Relation\Specialization;
+use Prov\Relation\Start;
+use Prov\Relation\Usage;
+
+/**
+ * Serializes Documents to and parses them from PROV-XML, the W3C's
+ * XML-based interchange format for PROV.
+ *
+ * @mago-ignore analysis:possibly-false-argument
+ * @mago-ignore analysis:invalid-method-access
+ * @mago-ignore analysis:invalid-property-access
+ */
+class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterface
+{
+    private const string PROV_NS = 'http://www.w3.org/ns/prov#';
+    private const string XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
+    private const string XSD_NS = 'http://www.w3.org/2001/XMLSchema';
+
+    // PROV-XML element names match PROV-JSON keys; use shared constant.
+
+    /**
+     * Maps PROV-XML child element local names to relation formal attribute names.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const array FORMAL_CHILD_ELEMENTS = [
+        'wasGeneratedBy' => ['entity' => 'entity', 'activity' => 'activity', 'time' => 'time'],
+        'used' => ['activity' => 'activity', 'entity' => 'entity', 'time' => 'time'],
+        'wasInformedBy' => ['informed' => 'informed', 'informant' => 'informant'],
+        'wasStartedBy' => ['activity' => 'activity', 'trigger' => 'trigger', 'starter' => 'starter', 'time' => 'time'],
+        'wasEndedBy' => ['activity' => 'activity', 'trigger' => 'trigger', 'ender' => 'ender', 'time' => 'time'],
+        'wasInvalidatedBy' => ['entity' => 'entity', 'activity' => 'activity', 'time' => 'time'],
+        'wasDerivedFrom' => [
+            'generatedEntity' => 'generatedEntity',
+            'usedEntity' => 'usedEntity',
+            'activity' => 'activity',
+            'generation' => 'generation',
+            'usage' => 'usage',
+        ],
+        'wasAttributedTo' => ['entity' => 'entity', 'agent' => 'agent'],
+        'wasAssociatedWith' => ['activity' => 'activity', 'agent' => 'agent', 'plan' => 'plan'],
+        'actedOnBehalfOf' => ['delegate' => 'delegate', 'responsible' => 'responsible', 'activity' => 'activity'],
+        'wasInfluencedBy' => ['influencee' => 'influencee', 'influencer' => 'influencer'],
+        'specializationOf' => ['specificEntity' => 'specificEntity', 'generalEntity' => 'generalEntity'],
+        'alternateOf' => ['alternate1' => 'alternate1', 'alternate2' => 'alternate2'],
+        'hadMember' => ['collection' => 'collection', 'entity' => 'entity'],
+        'mentionOf' => ['specificEntity' => 'specificEntity', 'generalEntity' => 'generalEntity', 'bundle' => 'bundle'],
+        'hadDictionaryMember' => ['dictionary' => 'dictionary', 'keyEntityPair' => '_keyEntityPair'],
+        'derivedByInsertionFrom' => [
+            'newDictionary' => 'after',
+            'oldDictionary' => 'before',
+            'keyEntityPair' => '_keyEntityPair',
+        ],
+        'derivedByRemovalFrom' => ['newDictionary' => 'after', 'oldDictionary' => 'before', 'key' => '_key'],
+    ];
+
+    public function __construct(
+        public readonly bool $prettyPrint = true,
+    ) {}
+
+    // ============================================================
+    // Serialization
+    // ============================================================
+
+    /**
+     * {@inheritdoc}
+     *
+     * @throws \RuntimeException
+     *   If DOMDocument::saveXML fails after building a well-formed tree.
+     */
+    #[\NoDiscard]
+    public function serialize(Document $document): string
+    {
+        $dom = new \DOMDocument('1.0', 'UTF-8');
+        $dom->formatOutput = $this->prettyPrint;
+
+        $root = $dom->createElementNS(self::PROV_NS, 'prov:document');
+        $dom->appendChild($root);
+
+        $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:xsi', self::XSI_NS);
+        $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:xsd', self::XSD_NS);
+
+        $nsManager = new NamespaceManager();
+        foreach ($document->namespaces as $ns) {
+            if ($ns->prefix === 'prov' || $ns->prefix === 'xsd') {
+                $nsManager->add($ns);
+                continue;
+            }
+            if ($ns->prefix === 'default') {
+                // PROV's "default" namespace is the XML default namespace.
+                $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns', $ns->uri);
+                $nsManager->setDefault($ns);
+                continue;
+            }
+            $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:' . $ns->prefix, $ns->uri);
+            $nsManager->add($ns);
+        }
+
+        foreach ($document->records as $record) {
+            $this->serializeRecord($dom, $root, $record, $nsManager);
+        }
+
+        foreach ($document->bundles as $bundle) {
+            $this->serializeBundle($dom, $root, $bundle, $nsManager);
+        }
+
+        $xml = $dom->saveXML();
+        if ($xml === false) {
+            throw new \RuntimeException('DOMDocument::saveXML failed on a well-formed document.');
+        }
+        return $xml;
+    }
+
+    private function serializeRecord(
+        \DOMDocument $dom,
+        \DOMElement $parent,
+        ProvRecord $record,
+        NamespaceManager $nsManager,
+    ): void {
+        if ($record instanceof Entity) {
+            $this->serializeElement($dom, $parent, 'entity', $record, $nsManager);
+        } elseif ($record instanceof Activity) {
+            $this->serializeActivity($dom, $parent, $record, $nsManager);
+        } elseif ($record instanceof Agent) {
+            $this->serializeElement($dom, $parent, 'agent', $record, $nsManager);
+        } elseif ($record instanceof ProvRelation) {
+            $this->serializeRelation($dom, $parent, $record, $nsManager);
+        }
+    }
+
+    private function serializeElement(
+        \DOMDocument $dom,
+        \DOMElement $parent,
+        string $tagName,
+        Entity|Agent $record,
+        NamespaceManager $nsManager,
+    ): void {
+        $el = $dom->createElementNS(self::PROV_NS, 'prov:' . $tagName);
+        if ($record->identifier !== null) {
+            $el->setAttributeNS(self::PROV_NS, 'prov:id', (string) $record->identifier);
+        }
+        $this->serializeAttributes($dom, $el, $record->attributes, $nsManager);
+        $parent->appendChild($el);
+    }
+
+    private function serializeActivity(
+        \DOMDocument $dom,
+        \DOMElement $parent,
+        Activity $record,
+        NamespaceManager $nsManager,
+    ): void {
+        $el = $dom->createElementNS(self::PROV_NS, 'prov:activity');
+        if ($record->identifier !== null) {
+            $el->setAttributeNS(self::PROV_NS, 'prov:id', (string) $record->identifier);
+        }
+        if ($record->startTime !== null) {
+            $el->appendChild($dom->createElementNS(
+                self::PROV_NS,
+                'prov:startTime',
+                $record->startTime->format(\DateTimeInterface::ATOM),
+            ));
+        }
+        if ($record->endTime !== null) {
+            $el->appendChild($dom->createElementNS(
+                self::PROV_NS,
+                'prov:endTime',
+                $record->endTime->format(\DateTimeInterface::ATOM),
+            ));
+        }
+        $this->serializeAttributes($dom, $el, $record->attributes, $nsManager);
+        $parent->appendChild($el);
+    }
+
+    private function serializeRelation(
+        \DOMDocument $dom,
+        \DOMElement $parent,
+        ProvRelation $record,
+        NamespaceManager $nsManager,
+    ): void {
+        $tagName = RelationMetadata::JSON_KEYS[$record::class] ?? null;
+        if ($tagName === null) {
+            return;
+        }
+
+        $el = $dom->createElementNS(self::PROV_NS, 'prov:' . $tagName);
+        if ($record->identifier !== null) {
+            $el->setAttributeNS(self::PROV_NS, 'prov:id', (string) $record->identifier);
+        }
+
+        $this->serializeRelationFormals($dom, $el, $record);
+
+        // Dictionary-specific child elements.
+        if ($record instanceof DictionaryMembership || $record instanceof DictionaryInsertion) {
+            foreach ($record->keyEntityPairs as $pair) {
+                $kep = $dom->createElementNS(self::PROV_NS, 'prov:keyEntityPair');
+                $keyEl = $dom->createElementNS(self::PROV_NS, 'prov:key');
+                $this->setTypedTextContent($keyEl, $pair->key, $nsManager);
+                $kep->appendChild($keyEl);
+                if ($pair->entity !== null) {
+                    $entityEl = $dom->createElementNS(self::PROV_NS, 'prov:entity');
+                    $entityEl->setAttributeNS(self::PROV_NS, 'prov:ref', (string) $pair->entity);
+                    $kep->appendChild($entityEl);
+                }
+                $el->appendChild($kep);
+            }
+        } elseif ($record instanceof DictionaryRemoval) {
+            // @mago-expect analysis:mixed-assignment
+            foreach ($record->removedKeys as $key) {
+                $keyEl = $dom->createElementNS(self::PROV_NS, 'prov:key');
+                $this->setTypedTextContent($keyEl, $key, $nsManager);
+                $el->appendChild($keyEl);
+            }
+        }
+
+        $this->serializeAttributes($dom, $el, $record->attributes, $nsManager);
+        $parent->appendChild($el);
+    }
+
+    private function setTypedTextContent(\DOMElement $el, mixed $value, NamespaceManager $nsManager): void
+    {
+        if ($value instanceof QualifiedName) {
+            $el->setAttributeNS(self::XSI_NS, 'xsi:type', 'xsd:QName');
+            $declaredNs = $nsManager->getNamespace($value->namespace->prefix);
+            if ($declaredNs === null || $declaredNs->uri !== $value->namespace->uri) {
+                $el->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns', $value->namespace->uri);
+                $el->textContent = $value->localPart;
+            } else {
+                $el->textContent = (string) $value;
+            }
+        } elseif ($value instanceof Literal) {
+            if ($value->datatype !== null) {
+                $el->setAttributeNS(self::XSI_NS, 'xsi:type', (string) $value->datatype);
+            }
+            if ($value->languageTag !== null) {
+                $el->setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', $value->languageTag);
+            }
+            $this->writeLiteralValue($el, $value);
+        } else {
+            $el->textContent = (string) $value;
+        }
+    }
+
+    /**
+     * Writes a Literal's value into an element. Regular literals use textContent;
+     * rdf:XMLLiteral values are parsed as XML fragments and appended as child nodes
+     * so their structure survives serialization.
+     */
+    private function writeLiteralValue(\DOMElement $el, Literal $value): void
+    {
+        $ownerDoc = $el->ownerDocument;
+        if (
+            $ownerDoc !== null
+            && $value->datatype?->getUri() === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral'
+        ) {
+            $frag = $ownerDoc->createDocumentFragment();
+            $previous = libxml_use_internal_errors(true);
+            try {
+                if ($frag->appendXML($value->value)) {
+                    $el->appendChild($frag);
+                    return;
+                }
+            } finally {
+                libxml_clear_errors();
+                libxml_use_internal_errors($previous);
+            }
+        }
+        $el->textContent = $value->value;
+    }
+
+    private function serializeRelationFormals(\DOMDocument $dom, \DOMElement $el, ProvRelation $record): void
+    {
+        $refProps = $this->getRefProperties($record);
+        foreach ($refProps as $childName => $value) {
+            if ($value instanceof QualifiedName) {
+                $child = $dom->createElementNS(self::PROV_NS, 'prov:' . $childName);
+                $child->setAttributeNS(self::PROV_NS, 'prov:ref', (string) $value);
+                $el->appendChild($child);
+            } elseif ($value instanceof \DateTimeImmutable) {
+                $el->appendChild($dom->createElementNS(
+                    self::PROV_NS,
+                    'prov:' . $childName,
+                    $value->format(\DateTimeInterface::ATOM),
+                ));
+            }
+        }
+    }
+
+    /**
+     * Extracts the formal fields of a relation that render as child elements
+     * in PROV-XML (QualifiedName references and DateTimeImmutable times),
+     * keyed by their XML element local name.
+     *
+     * @return array<string, \Prov\Identifier\QualifiedName|\DateTimeImmutable|null>
+     */
+    private function getRefProperties(ProvRelation $record): array
+    {
+        // Dictionary relations use different XML element names than property names.
+        if ($record instanceof DictionaryMembership) {
+            return ['dictionary' => $record->dictionary];
+        }
+        if ($record instanceof DictionaryInsertion) {
+            return ['newDictionary' => $record->after, 'oldDictionary' => $record->before];
+        }
+        if ($record instanceof DictionaryRemoval) {
+            return ['newDictionary' => $record->after, 'oldDictionary' => $record->before];
+        }
+
+        // For all other relations, property names match XML element names. Read the
+        // relation's fields directly to skip the extractFormals intermediate array.
+        $meta = RelationMetadata::FORMALS[$record::class] ?? [];
+        $vars = get_object_vars($record);
+
+        $result = [];
+        foreach ($meta as $prop => $type) {
+            if ($type !== 'ref' && $type !== 'time') {
+                continue;
+            }
+            // @mago-expect analysis:mixed-assignment
+            $value = $vars[$prop] ?? null;
+            if ($value === null || $value instanceof QualifiedName || $value instanceof \DateTimeImmutable) {
+                $result[$prop] = $value;
+            }
+        }
+        return $result;
+    }
+
+    private function serializeAttributes(
+        \DOMDocument $dom,
+        \DOMElement $parent,
+        Attributes $attributes,
+        NamespaceManager $nsManager,
+    ): void {
+        foreach ($attributes->all() as $uri => $values) {
+            $prefixed = $nsManager->uriToPrefixed($uri);
+            foreach ($values as $value) {
+                $this->serializeAttributeValue($dom, $parent, $prefixed, $value, $nsManager);
+            }
+        }
+    }
+
+    private function serializeAttributeValue(
+        \DOMDocument $dom,
+        \DOMElement $parent,
+        string $prefixedKey,
+        mixed $value,
+        NamespaceManager $nsManager,
+    ): void {
+        // Resolve the key to namespace URI + local part for createElement.
+        $parts = explode(':', $prefixedKey, 2);
+        // XML element names can't start with a digit; PROV-XML's convention is to
+        // prefix such local parts with an underscore.
+        if (count($parts) === 2) {
+            $local = $parts[1];
+            if ($local !== '' && ctype_digit($local[0])) {
+                $prefixedKey = $parts[0] . ':_' . $local;
+            }
+            $ns = $nsManager->getNamespace($parts[0]);
+            if ($ns !== null) {
+                $el = $dom->createElementNS($ns->uri, $prefixedKey);
+            } else {
+                $el = $dom->createElement($prefixedKey);
+            }
+        } else {
+            if ($prefixedKey !== '' && ctype_digit($prefixedKey[0])) {
+                $prefixedKey = '_' . $prefixedKey;
+            }
+            $el = $dom->createElement($prefixedKey);
+        }
+
+        if ($value instanceof QualifiedName) {
+            $this->setTypedTextContent($el, $value, $nsManager);
+        } elseif ($value instanceof Literal) {
+            if ($value->languageTag !== null) {
+                $el->setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', $value->languageTag);
+            } elseif ($value->datatype !== null) {
+                $el->setAttributeNS(self::XSI_NS, 'xsi:type', (string) $value->datatype);
+            }
+            $this->writeLiteralValue($el, $value);
+        } elseif (is_bool($value)) {
+            $el->setAttributeNS(self::XSI_NS, 'xsi:type', 'xsd:boolean');
+            $el->textContent = $value ? 'true' : 'false';
+        } elseif (is_int($value)) {
+            $el->setAttributeNS(self::XSI_NS, 'xsi:type', 'xsd:int');
+            $el->textContent = (string) $value;
+        } elseif (is_float($value)) {
+            $el->setAttributeNS(self::XSI_NS, 'xsi:type', 'xsd:float');
+            $el->textContent = (string) $value;
+        } else {
+            $el->textContent = (string) $value;
+        }
+
+        $parent->appendChild($el);
+    }
+
+    private function serializeBundle(
+        \DOMDocument $dom,
+        \DOMElement $parent,
+        Bundle $bundle,
+        NamespaceManager $nsManager,
+    ): void {
+        $el = $dom->createElementNS(self::PROV_NS, 'prov:bundleContent');
+        $el->setAttributeNS(self::PROV_NS, 'prov:id', (string) $bundle->identifier);
+
+        foreach ($bundle->records as $record) {
+            $this->serializeRecord($dom, $el, $record, $nsManager);
+        }
+
+        $parent->appendChild($el);
+    }
+
+    // ============================================================
+    // Deserialization
+    // ============================================================
+
+    /**
+     * {@inheritdoc}
+     */
+    public function deserialize(string $data): Document
+    {
+        // DOMDocument::loadXML throws ValueError on empty input (PHP 8.4+); normalize
+        // to the library's own exception type so callers catching ProvException hit it.
+        if ($data === '') {
+            throw new DeserializationException('Invalid PROV-XML: empty input.');
+        }
+
+        $dom = new \DOMDocument();
+        $previousErrors = libxml_use_internal_errors(true);
+        // LIBXML_NONET blocks remote DTD/entity fetches. PROV-XML has no legitimate
+        // DOCTYPE use, so we reject documents that declare one to prevent internal
+        // entity expansion attacks (billion-laughs, parameter-entity tricks).
+        $success = $dom->loadXML($data, LIBXML_NONET);
+        $errors = libxml_get_errors();
+        libxml_clear_errors();
+        libxml_use_internal_errors($previousErrors);
+
+        if ($success && $dom->doctype !== null) {
+            throw new DeserializationException('Invalid PROV-XML: DOCTYPE declarations are not allowed.');
+        }
+
+        if (!$success) {
+            $messages = array_map(static fn(\LibXMLError $e): string => trim($e->message), $errors);
+            throw new DeserializationException(
+                'Invalid PROV-XML: ' . ($messages !== [] ? implode('; ', $messages) : 'could not parse XML.'),
+            );
+        }
+
+        $root = $dom->documentElement;
+        if ($root === null || $root->localName !== 'document' || $root->namespaceURI !== self::PROV_NS) {
+            throw new DeserializationException('Invalid PROV-XML: root element must be prov:document.');
+        }
+
+        $nsManager = new NamespaceManager();
+        $this->extractLocalNamespaces($root, $nsManager);
+
+        $records = [];
+        $bundles = [];
+        $this->deserializeChildren($root, $nsManager, $records, $bundles);
+        assert(is_array($bundles));
+
+        return new Document(records: $records, bundles: $bundles, namespaces: $nsManager->getRegisteredNamespaces());
+    }
+
+    /**
+     * Walks the children of a `prov:document` or `prov:bundle` element,
+     * dispatching each record-like element to the matching handler.
+     *
+     * @param list<\Prov\Model\ProvRecord> $records
+     * @param list<\Prov\Bundle>|null $bundles
+     *   Null when called inside a bundle scope.
+     *
+     * @mago-ignore analysis:conflicting-reference-constraint
+     */
+    private function deserializeChildren(
+        \DOMElement $parent,
+        NamespaceManager $nsManager,
+        array &$records,
+        ?array &$bundles,
+    ): void {
+        foreach ($parent->childNodes as $node) {
+            if (!$node instanceof \DOMElement || $node->namespaceURI !== self::PROV_NS) {
+                continue;
+            }
+
+            match ($node->localName) {
+                'entity' => $this->deserializeEntity($node, $nsManager, $records),
+                'activity' => $this->deserializeActivity($node, $nsManager, $records),
+                'agent' => $this->deserializeAgent($node, $nsManager, $records),
+                'wasGeneratedBy',
+                'used',
+                'wasInformedBy',
+                'wasStartedBy',
+                'wasEndedBy',
+                'wasInvalidatedBy',
+                'wasDerivedFrom',
+                'revision',
+                'quotation',
+                'primarySource',
+                'wasAttributedTo',
+                'wasAssociatedWith',
+                'actedOnBehalfOf',
+                'wasInfluencedBy',
+                'specializationOf',
+                'alternateOf',
+                'hadMember',
+                'mentionOf',
+                    => $this->deserializeRelation($node, $nsManager, $records),
+                'hadDictionaryMember',
+                'derivedByInsertionFrom',
+                'derivedByRemovalFrom',
+                    => $this->deserializeDictionaryRelation($node, $nsManager, $records),
+                'bundleContent' => $bundles !== null
+                    ? $this->deserializeBundleContent($node, $nsManager, $bundles)
+                    : null,
+                default => null, // Ignore unknown elements (prov:other, etc.)
+            };
+        }
+    }
+
+    /**
+     * @param list<\Prov\Model\ProvRecord> $records
+     */
+    private function deserializeEntity(\DOMElement $el, NamespaceManager $nsManager, array &$records): void
+    {
+        $idStr = $this->resolveProvId($el, $nsManager);
+        $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
+        $attrs = $this->deserializeChildAttributes($el, $nsManager) ?? Attributes::empty();
+        $records[] = new Entity($id, $attrs);
+    }
+
+    /**
+     * @param list<\Prov\Model\ProvRecord> $records
+     */
+    private function deserializeActivity(\DOMElement $el, NamespaceManager $nsManager, array &$records): void
+    {
+        $idStr = $this->resolveProvId($el, $nsManager);
+        $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
+        $startTime = null;
+        $endTime = null;
+
+        foreach ($el->childNodes as $child) {
+            if (!$child instanceof \DOMElement || $child->namespaceURI !== self::PROV_NS) {
+                continue;
+            }
+            if ($child->localName === 'startTime') {
+                $startTime = new \DateTimeImmutable($child->textContent);
+            } elseif ($child->localName === 'endTime') {
+                $endTime = new \DateTimeImmutable($child->textContent);
+            }
+        }
+
+        $attrs = $this->deserializeChildAttributes($el, $nsManager, ['startTime', 'endTime']) ?? Attributes::empty();
+        $records[] = new Activity($id, $startTime, $endTime, $attrs);
+    }
+
+    /**
+     * @param list<\Prov\Model\ProvRecord> $records
+     */
+    private function deserializeAgent(\DOMElement $el, NamespaceManager $nsManager, array &$records): void
+    {
+        $idStr = $this->resolveProvId($el, $nsManager);
+        $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
+        $attrs = $this->deserializeChildAttributes($el, $nsManager) ?? Attributes::empty();
+        $records[] = new Agent($id, $attrs);
+    }
+
+    /**
+     * PROV-XML shortcut element names that desugar to a Derivation with a prov:type attribute.
+     *
+     * @var array<string, string>
+     */
+    private const array DERIVATION_SUBTYPE_ELEMENTS = [
+        'revision' => 'Revision',
+        'quotation' => 'Quotation',
+        'primarySource' => 'PrimarySource',
+    ];
+
+    /**
+     * @param list<\Prov\Model\ProvRecord> $records
+     */
+    private function deserializeRelation(\DOMElement $el, NamespaceManager $nsManager, array &$records): void
+    {
+        $relName = $el->localName;
+        if ($relName === null) {
+            return;
+        }
+        $injectedSubtype = self::DERIVATION_SUBTYPE_ELEMENTS[$relName] ?? null;
+        if ($injectedSubtype !== null) {
+            $relName = 'wasDerivedFrom';
+        }
+        $idStr = $this->resolveProvId($el, $nsManager);
+        $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
+        $formalMap = self::FORMAL_CHILD_ELEMENTS[$relName] ?? [];
+
+        /** @var array<string, \Prov\Identifier\QualifiedName|\DateTimeImmutable> $formals */
+        $formals = [];
+        $skipChildNames = array_keys($formalMap);
+
+        foreach ($el->childNodes as $child) {
+            if (!$child instanceof \DOMElement || $child->namespaceURI !== self::PROV_NS) {
+                continue;
+            }
+            $childLocalName = $child->localName;
+            if ($childLocalName !== null && isset($formalMap[$childLocalName])) {
+                $ref = $child->getAttributeNS(self::PROV_NS, 'ref');
+                if ($ref !== '') {
+                    $formals[$formalMap[$childLocalName]] = $nsManager->resolve($this->resolveQNameInContext(
+                        $ref,
+                        $child,
+                        $nsManager,
+                    ));
+                } elseif ($childLocalName === 'time') {
+                    $formals[$formalMap[$childLocalName]] = new \DateTimeImmutable($child->textContent);
+                }
+            }
+        }
+
+        $attrs = $this->deserializeChildAttributes($el, $nsManager, $skipChildNames) ?? Attributes::empty();
+
+        if ($injectedSubtype !== null) {
+            $attrs = $attrs->with($nsManager->resolve('prov:type'), $nsManager->resolve('prov:' . $injectedSubtype));
+        }
+
+        $q = static fn(string $k) => isset($formals[$k]) && $formals[$k] instanceof QualifiedName ? $formals[$k] : null;
+        $t = static fn(string $k) => isset($formals[$k]) && $formals[$k] instanceof \DateTimeImmutable
+            ? $formals[$k]
+            : null;
+
+        $record = match ($relName) {
+            'wasGeneratedBy' => new Generation($id, $q('entity'), $q('activity'), $t('time'), $attrs),
+            'used' => new Usage($id, $q('activity'), $q('entity'), $t('time'), $attrs),
+            'wasInformedBy' => new Communication($id, $q('informed'), $q('informant'), $attrs),
+            'wasStartedBy' => new Start($id, $q('activity'), $q('trigger'), $q('starter'), $t('time'), $attrs),
+            'wasEndedBy' => new End($id, $q('activity'), $q('trigger'), $q('ender'), $t('time'), $attrs),
+            'wasInvalidatedBy' => new Invalidation($id, $q('entity'), $q('activity'), $t('time'), $attrs),
+            'wasDerivedFrom' => new Derivation(
+                $id,
+                $q('generatedEntity'),
+                $q('usedEntity'),
+                $q('activity'),
+                $q('generation'),
+                $q('usage'),
+                $attrs,
+            ),
+            'wasAttributedTo' => new Attribution($id, $q('entity'), $q('agent'), $attrs),
+            'wasAssociatedWith' => new Association($id, $q('activity'), $q('agent'), $q('plan'), $attrs),
+            'actedOnBehalfOf' => new Delegation($id, $q('delegate'), $q('responsible'), $q('activity'), $attrs),
+            'wasInfluencedBy' => new Influence($id, $q('influencee'), $q('influencer'), $attrs),
+            'specializationOf' => new Specialization($id, $q('specificEntity'), $q('generalEntity'), $attrs),
+            'alternateOf' => new Alternate($id, $q('alternate1'), $q('alternate2'), $attrs),
+            'hadMember' => new Membership($id, $q('collection'), $q('entity'), $attrs),
+            'mentionOf' => new Mention($id, $q('specificEntity'), $q('generalEntity'), $q('bundle'), $attrs),
+            default => null,
+        };
+        if ($record !== null) {
+            $records[] = $record;
+        }
+    }
+
+    /**
+     * @param list<\Prov\Model\ProvRecord> $records
+     */
+    private function deserializeDictionaryRelation(\DOMElement $el, NamespaceManager $nsManager, array &$records): void
+    {
+        $relName = $el->localName;
+        $idStr = $this->resolveProvId($el, $nsManager);
+        $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
+
+        $keyEntityPairs = [];
+        $removedKeys = [];
+        $dictionary = null;
+        $newDict = null;
+        $oldDict = null;
+
+        foreach ($el->childNodes as $child) {
+            if (!$child instanceof \DOMElement || $child->namespaceURI !== self::PROV_NS) {
+                continue;
+            }
+
+            match ($child->localName) {
+                'dictionary' => $dictionary = $child->getAttributeNS(self::PROV_NS, 'ref') ?: null,
+                'newDictionary' => $newDict = $child->getAttributeNS(self::PROV_NS, 'ref') ?: null,
+                'oldDictionary' => $oldDict = $child->getAttributeNS(self::PROV_NS, 'ref') ?: null,
+                'keyEntityPair' => $keyEntityPairs[] = $this->parseKeyEntityPair($child, $nsManager),
+                'key' => $removedKeys[] = $this->deserializeAttrValue($child, $nsManager),
+                default => null,
+            };
+        }
+
+        $extraAttrs = $this->deserializeChildAttributes($el, $nsManager, [
+            'dictionary',
+            'newDictionary',
+            'oldDictionary',
+            'keyEntityPair',
+            'key',
+        ]) ?? Attributes::empty();
+
+        $dictQn = $dictionary !== null ? $nsManager->resolve($dictionary) : null;
+        $newDictQn = $newDict !== null ? $nsManager->resolve($newDict) : null;
+        $oldDictQn = $oldDict !== null ? $nsManager->resolve($oldDict) : null;
+
+        $record = match ($relName) {
+            'hadDictionaryMember' => new DictionaryMembership($id, $dictQn, $keyEntityPairs, $extraAttrs),
+            'derivedByInsertionFrom' => new DictionaryInsertion(
+                $id,
+                $newDictQn,
+                $oldDictQn,
+                $keyEntityPairs,
+                $extraAttrs,
+            ),
+            'derivedByRemovalFrom' => new DictionaryRemoval($id, $newDictQn, $oldDictQn, $removedKeys, $extraAttrs),
+            default => null,
+        };
+        if ($record !== null) {
+            $records[] = $record;
+        }
+    }
+
+    private function parseKeyEntityPair(\DOMElement $el, NamespaceManager $nsManager): DictionaryEntry
+    {
+        $key = null;
+        $entity = null;
+
+        foreach ($el->childNodes as $child) {
+            if (!$child instanceof \DOMElement || $child->namespaceURI !== self::PROV_NS) {
+                continue;
+            }
+
+            if ($child->localName === 'key') {
+                $key = $this->deserializeAttrValue($child, $nsManager);
+            } elseif ($child->localName === 'entity') {
+                $ref = $child->getAttributeNS(self::PROV_NS, 'ref');
+                $entity = $ref !== '' ? $nsManager->resolve($ref) : null;
+            }
+        }
+
+        return new DictionaryEntry($key, $entity);
+    }
+
+    /**
+     * @param list<\Prov\Bundle> $bundles
+     */
+    private function deserializeBundleContent(\DOMElement $el, NamespaceManager $nsManager, array &$bundles): void
+    {
+        $id = $this->resolveProvId($el, $nsManager);
+        if ($id === null) {
+            return;
+        }
+
+        $bundleNsManager = new NamespaceManager($nsManager);
+        $this->extractLocalNamespaces($el, $bundleNsManager);
+
+        $bundleRecords = [];
+        $nestedBundles = null;
+        $this->deserializeChildren($el, $bundleNsManager, $bundleRecords, $nestedBundles);
+
+        $bundles[] = new Bundle(
+            identifier: $nsManager->resolve($id),
+            records: $bundleRecords,
+            namespaces: $bundleNsManager->getRegisteredNamespaces(),
+        );
+    }
+
+    /**
+     * Register namespace declarations that appear on $el but are not inherited from its parent.
+     * In-scope namespaces visible on the element (via `namespace::*`) include ancestors too; we
+     * filter those out by comparing against the parent element's lookup.
+     */
+    private function extractLocalNamespaces(\DOMElement $el, NamespaceManager $target): void
+    {
+        $ownerDoc = $el->ownerDocument;
+        if ($ownerDoc === null) {
+            return;
+        }
+        $xpath = new \DOMXPath($ownerDoc);
+        $parent = $el->parentNode instanceof \DOMElement ? $el->parentNode : null;
+
+        // @mago-expect analysis:mixed-assignment
+        $nsNodes = $xpath->query('namespace::*', $el);
+        if (!$nsNodes instanceof \DOMNodeList) {
+            return;
+        }
+
+        foreach ($nsNodes as $nsNode) {
+            if (!$nsNode instanceof \DOMNameSpaceNode && !$nsNode instanceof \DOMNode) {
+                continue;
+            }
+            $prefix = $nsNode->localName;
+            $uri = $nsNode->nodeValue;
+            if (!is_string($prefix) || !is_string($uri)) {
+                continue;
+            }
+
+            if ($prefix === 'xml' || $prefix === 'xsi') {
+                continue;
+            }
+
+            $inheritedUri = $prefix === 'xmlns'
+                ? $parent?->lookupNamespaceURI(null)
+                : $parent?->lookupNamespaceURI($prefix);
+            if ($inheritedUri === $uri) {
+                continue;
+            }
+
+            if ($prefix === 'xmlns') {
+                $target->setDefault(new ProvNamespace('default', $uri));
+                continue;
+            }
+
+            $target->add(new ProvNamespace($prefix, $uri));
+        }
+    }
+
+    // --- Helpers ---
+
+    private function getProvId(\DOMElement $el): ?string
+    {
+        $id = $el->getAttributeNS(self::PROV_NS, 'id');
+        return $id !== '' ? $id : null;
+    }
+
+    private function resolveProvId(\DOMElement $el, NamespaceManager $nsManager): ?string
+    {
+        $id = $this->getProvId($el);
+        if ($id === null) {
+            return null;
+        }
+        return $this->resolveQNameInContext($id, $el, $nsManager);
+    }
+
+    /**
+     * Resolve a prov:id or prov:ref value in the element's namespace context.
+     * Unprefixed QNames use the element-local default namespace.
+     */
+    private function resolveQNameInContext(string $value, \DOMElement $el, NamespaceManager $nsManager): string
+    {
+        // Already prefixed: the caller resolves it against the namespace manager.
+        if (str_contains($value, ':')) {
+            return $value;
+        }
+
+        // Unprefixed: check for element-local default namespace.
+        $defaultUri = $el->lookupNamespaceURI(null);
+        if ($defaultUri !== null) {
+            // Find a registered prefix for this URI.
+            foreach ($nsManager->getRegisteredNamespaces() as $ns) {
+                if ($ns->uri === $defaultUri) {
+                    return $ns->prefix . ':' . $value;
+                }
+            }
+            // No registered prefix: walk up to check parent namespace managers.
+            $resolved = $nsManager->resolveUri($defaultUri . $value);
+            if ($resolved !== null) {
+                return (string) $resolved;
+            }
+            // Register a synthetic namespace so the caller can resolve it.
+            $syntheticPrefix = '_ns' . crc32($defaultUri);
+            $ns = new ProvNamespace($syntheticPrefix, $defaultUri);
+            $nsManager->add($ns);
+            return $syntheticPrefix . ':' . $value;
+        }
+
+        return $value;
+    }
+
+    /**
+     * Deserialize child elements as extra attributes, skipping formal attributes.
+     *
+     * @param list<string> $skipLocalNames
+     */
+    private function deserializeChildAttributes(
+        \DOMElement $parent,
+        NamespaceManager $nsManager,
+        array $skipLocalNames = [],
+    ): ?Attributes {
+        $attrs = new Attributes();
+        $hasAny = false;
+
+        foreach ($parent->childNodes as $child) {
+            if (!$child instanceof \DOMElement) {
+                continue;
+            }
+
+            // Skip formal attributes (in prov namespace).
+            if ($child->namespaceURI === self::PROV_NS && in_array($child->localName, $skipLocalNames, true)) {
+                continue;
+            }
+
+            // PROV-XML encodes an attribute whose local part starts with a digit
+            // (e.g. `0tagWithDigit`) as `_0tagWithDigit` so the XML element name
+            // is valid. Strip the leading underscore to recover the canonical name.
+            $localName = $child->localName;
+            if ($localName === null) {
+                continue;
+            }
+            if (preg_match('/^_[0-9]/', $localName) === 1) {
+                $localName = substr($localName, 1);
+            }
+            $prefix = $child->prefix;
+            $keyStr = $prefix !== '' ? $prefix . ':' . $localName : $localName;
+
+            $key = $nsManager->resolve($keyStr);
+            $value = $this->deserializeAttrValue($child, $nsManager);
+
+            $attrs = $attrs->with($key, $value);
+            $hasAny = true;
+        }
+
+        return $hasAny ? $attrs : null;
+    }
+
+    private function deserializeAttrValue(\DOMElement $el, NamespaceManager $nsManager): QualifiedName|Literal|string
+    {
+        $xsiType = $el->getAttributeNS(self::XSI_NS, 'type');
+        $lang = $el->getAttributeNS('http://www.w3.org/XML/1998/namespace', 'lang');
+
+        if ($lang !== '') {
+            return new Literal($el->textContent, languageTag: $lang);
+        }
+
+        if ($xsiType !== '') {
+            if ($xsiType === 'xsd:QName') {
+                // QName values must be resolved in the element's namespace context,
+                // which may have local xmlns overrides.
+                $localNs = $nsManager;
+                $defaultUri = $el->lookupNamespaceURI(null);
+                if ($defaultUri !== null) {
+                    $localNs = new NamespaceManager($nsManager);
+                    $localNs->setDefault(new ProvNamespace('default', $defaultUri));
+                }
+                return $localNs->resolve($el->textContent);
+            }
+            $datatype = $nsManager->resolve($xsiType);
+            // rdf:XMLLiteral carries literal XML content; serialize child nodes instead
+            // of calling textContent (which strips element structure).
+            if ($datatype->getUri() === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral') {
+                return new Literal($this->innerXml($el), datatype: $datatype);
+            }
+            return new Literal($el->textContent, datatype: $datatype);
+        }
+
+        return $el->textContent;
+    }
+
+    private function innerXml(\DOMElement $el): string
+    {
+        $doc = $el->ownerDocument;
+        if ($doc === null) {
+            return '';
+        }
+        $out = '';
+        foreach ($el->childNodes as $child) {
+            if (!$child instanceof \DOMNode) {
+                continue;
+            }
+            $serialized = $doc->saveXML($child);
+            if ($serialized !== false) {
+                $out .= $serialized;
+            }
+        }
+        return $out;
+    }
+}

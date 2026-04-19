@@ -1,0 +1,24 @@
+{
+    "$schema": "./vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": [
+            "src"
+        ]
+    },
+    "timeout": 30,
+    "logs": {
+        "text": "build/infection/infection.log",
+        "summary": "build/infection/summary.log",
+        "json": "build/infection/infection.json"
+    },
+    "phpUnit": {
+        "configDir": "."
+    },
+    "mutators": {
+        "@default": true,
+        // (string) casts on Stringable objects (QualifiedName, ProvNamespace, Literal)
+        // and scalar-stringifiable values are idempotent: PHP coerces automatically,
+        // so removing the cast produces identical output.
+        "CastString": false,
+    },
+}

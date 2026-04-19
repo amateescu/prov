@@ -1,0 +1,23 @@
+/vendor/
+/build/
+composer.lock
+composer.phar
+phpunit.xml
+.phpunit.result.cache
+.phpunit.cache/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.fleet/
+.vscode/
+*.swp
+*.swo
+
+# AI tools
+.claude/
+.cursor/
+.copilot/

@@ -1,0 +1,81 @@
+{
+    "name": "amateescu/prov",
+    "description": "PHP implementation of the W3C Provenance Data Model (PROV-DM)",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "prov",
+        "prov-dm",
+        "provenance",
+        "w3c",
+        "rdf",
+        "serialization"
+    ],
+    "authors": [
+        {
+            "name": "Andrei Mateescu",
+            "email": "andrei@amateescu.me"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/amateescu/prov/issues",
+        "source": "https://github.com/amateescu/prov"
+    },
+    "repositories": [
+        {
+            "type": "package",
+            "package": {
+                "name": "openprov/testcases",
+                "version": "1.0.0",
+                "source": {
+                    "url": "https://github.com/openprov/testcases.git",
+                    "type": "git",
+                    "reference": "01bb49be0dc05519f93ae5203634cf689e83dc6a"
+                }
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "ext-json": "*"
+    },
+    "suggest": {
+        "ext-dom": "Required for XmlSerializer (PROV-XML serialization and deserialization)"
+    },
+    "require-dev": {
+        "carthage-software/mago": "^1.24.0",
+        "infection/infection": "^0.32.6",
+        "openprov/testcases": "1.0.0",
+        "phpunit/phpunit": "^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Prov\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Prov\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "test:coverage": "phpunit --coverage-html build/coverage --coverage-clover build/coverage/clover.xml --coverage-text",
+        "mutate": "@php -d memory_limit=2G vendor/bin/infection --threads=max --min-msi=77 --only-covering-test-cases",
+        "lint": "mago lint",
+        "analyze": "mago analyze",
+        "format": "mago fmt",
+        "format:check": "mago fmt --check",
+        "check": [
+            "@format:check",
+            "@lint",
+            "@analyze",
+            "@test"
+        ]
+    },
+    "config": {
+        "allow-plugins": {
+            "infection/extension-installer": true
+        }
+    }
+}

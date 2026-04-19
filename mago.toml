@@ -1,0 +1,79 @@
+version = "1"
+php-version = "8.4"
+
+[source]
+paths = ["src", "tests"]
+includes = ["vendor"]
+
+[linter]
+integrations = ["phpunit"]
+
+[linter.rules]
+# --- Threshold adjustments for spec-driven code ---
+# PROV-DM defines 15+ record types, so builders, serializers, and validators
+# naturally have many methods, properties, and branches.
+too-many-properties = { threshold = 25 }
+too-many-enum-cases = { threshold = 40 }
+excessive-parameter-list = { threshold = 8 }
+
+# --- Disabled: complexity metrics ---
+# Serializers, deserializers, and validators each handle all PROV-DM record
+# types, so high method counts and cyclomatic complexity are inherent to the
+# domain rather than a design problem.
+too-many-methods = { enabled = false }
+cyclomatic-complexity = { enabled = false }
+kan-defect = { enabled = false }
+halstead = { enabled = false }
+
+# --- Disabled: stylistic rules that conflict with the codebase ---
+no-else-clause = { enabled = false }         # elseif chains dispatch record types
+no-shorthand-ternary = { enabled = false }   # ?: is well-understood PHP syntax
+no-isset = { enabled = false }               # isset() is idiomatic here
+literal-named-argument = { enabled = false } # noisy for positional bool/int literals
+prefer-early-continue = { enabled = false }  # stylistic preference, not a correctness issue
+assert-description = { enabled = false }     # `assert(expr)` expressions are self-describing
+
+# Existing tests use `$this->assertXxx(...)`; match that style.
+assertion-style = { style = "this" }
+
+[analyzer]
+# Test code leans on PHPUnit assertions rather than explicit null checks / mixed
+# narrowing (hundreds of benign `mixed-array-access` on json_decode results and
+# `possibly-null-property-access` on lookup-by-id calls).
+excludes = ["tests"]
+
+# Builder signatures and DictionaryEntry::$key accept broad `array` by design
+# (convenience shape on the way in, narrowed inside resolveAttributes / validated
+# at use). Native PHP types can't express the narrow shape, and docblock
+# @param's would clone the same long union across 27 methods.
+ignore = ["imprecise-type"]
+
+minimum-fail-level = "warning"
+
+# Catch real issues beyond plain type-checking.
+find-unused-definitions = true
+find-unused-expressions = true
+find-unused-parameters = true
+analyze-dead-code = true
+no-boolean-literal-comparison = true
+check-missing-type-hints = true
+
+# Narrow after property reads, useful with readonly value objects.
+memoize-properties = true
+
+# Test code often indexes into decoded JSON / looks up records without prior
+# null checks; those patterns are guarded by PHPUnit assertions.
+allow-possibly-undefined-array-keys = true
+
+# Track throws, but don't force declaration of platform/test exceptions.
+check-throws = true
+unchecked-exceptions = [
+    "LogicException",
+    "Error",
+    "PHPUnit\\Exception",
+    # Thrown pervasively in parsers and on prefix resolution; documenting every
+    # @throws would be noise, and callers handle these at one place at the top
+    # level (the public deserialize() methods, which do declare them).
+    "Prov\\Exception\\NamespaceException",
+    "Prov\\Exception\\DeserializationException",
+]
