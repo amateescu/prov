@@ -31,7 +31,7 @@ use Prov\Relation\Start;
 use Prov\Relation\Usage;
 
 /**
- * Writes a Document as PROV-JSON-LD (the JSON-LD encoding of PROV-O). This
+ * Writes a Document as PROV-JSONLD (the JSON-LD encoding of PROV-O). This
  * format is serialize-only per the W3C specification; there is no matching
  * deserializer.
  */

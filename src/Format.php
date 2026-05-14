@@ -17,7 +17,7 @@ use Prov\Serializer\XmlSerializer;
  * Identifies a PROV serialization format.
  *
  * Use with the Prov facade (`Prov::serialize($doc, Format::Json)`) or directly
- * via `Format::Json->createSerializer()`. PROV-JSON-LD is serialize-only per
+ * via `Format::Json->createSerializer()`. PROV-JSONLD is serialize-only per
  * the W3C spec; calling `createDeserializer()` on it throws.
  */
 enum Format: string
@@ -53,7 +53,7 @@ enum Format: string
             self::ProvN => new ProvNDeserializer(),
             self::Xml => new XmlSerializer(),
             self::JsonLd => throw new ProvException(
-                'PROV-JSON-LD deserialization is not supported (serialize-only format).',
+                'PROV-JSONLD deserialization is not supported (serialize-only format).',
             ),
         };
     }

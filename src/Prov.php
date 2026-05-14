@@ -43,7 +43,7 @@ final class Prov
      * Parses a serialized PROV document into a Document using the given format.
      *
      * @throws \Prov\Exception\ProvException
-     *   When deserializing a serialize-only format (PROV-JSON-LD).
+     *   When deserializing a serialize-only format (PROV-JSONLD).
      */
     public static function deserialize(string $data, Format $format = Format::Json): Document
     {

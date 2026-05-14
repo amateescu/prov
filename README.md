@@ -7,7 +7,9 @@ PHP implementation of the [W3C Provenance Data Model (PROV-DM)](https://www.w3.o
 
 PROV-DM describes where things come from: **entities** (things you care about), **activities** (things that happen), and **agents** (who's responsible). Relations like `wasGeneratedBy` and `wasAttributedTo` connect them to form a provenance graph.
 
-This library provides a fluent builder for assembling that graph, round-trip serializers for PROV-JSON, PROV-N, and PROV-XML (plus serialize-only PROV-JSON-LD), document operations (`merge`, `flatten`, semantic equality), and a partial PROV-CONSTRAINTS validator.
+PROV-DM fits data lineage, audit trails, scientific-workflow provenance, attribution graphs, and any case where you need to record where information came from.
+
+This library provides a fluent builder for assembling that graph, round-trip serializers for [PROV-JSON](https://www.w3.org/Submission/prov-json/), [PROV-N](https://www.w3.org/TR/prov-n/), and [PROV-XML](https://www.w3.org/TR/prov-xml/) (plus serialize-only [PROV-JSONLD](https://www.w3.org/Submission/prov-jsonld/)), document operations (`merge`, `flatten`, semantic equality), and a partial [PROV-CONSTRAINTS](https://www.w3.org/TR/prov-constraints/) validator.
 
 ## Requirements
 
@@ -62,7 +64,7 @@ $parsed = Prov::deserialize($json, Format::Json);
 | PROV-JSON | yes | yes |
 | PROV-N | yes | yes |
 | PROV-XML | yes | yes |
-| PROV-JSON-LD | yes | no (would require an RDF-aware parser) |
+| PROV-JSONLD | yes | no (would require an RDF-aware parser) |
 
 ## Document operations
 
@@ -129,6 +131,11 @@ Every public class carries an inline docblock explaining what it's for. The most
 ## Development
 
 Before submitting a PR, run `composer check` (format, lint, analyze, tests).
+
+## See also
+
+- [`trungdong/prov`](https://github.com/trungdong/prov): Python implementation of PROV-DM.
+- [`lucmoreau/ProvToolbox`](https://github.com/lucmoreau/ProvToolbox): Java toolkit for PROV.
 
 ## License
 
