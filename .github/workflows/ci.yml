@@ -19,28 +19,30 @@ jobs:
             deps: lowest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: ${{ matrix.php }}
           extensions: dom, json, libxml, mbstring
           coverage: none
 
       - name: Install PHP dependencies
-        uses: ramsey/composer-install@v3
+        uses: ramsey/composer-install@a8d0d959dab41457692a5e2041bd9b757a119e3f # 3.2.1
         with:
           dependency-versions: ${{ matrix.deps }}
 
       - name: Mago format check
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1 format --check
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.23.1 format --check
 
       - name: Mago lint
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1 lint --reporting-format=github
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.23.1 lint --reporting-format=github
 
       - name: Mago analyze
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1 analyze --reporting-format=github
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.23.1 analyze --reporting-format=github
 
       - name: Tests
         run: composer test
@@ -49,23 +51,25 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.4'
           extensions: dom, json, libxml, mbstring
           coverage: pcov
 
       - name: Install PHP dependencies
-        uses: ramsey/composer-install@v3
+        uses: ramsey/composer-install@a8d0d959dab41457692a5e2041bd9b757a119e3f # 3.2.1
 
       - name: Run tests with coverage
         run: composer test:coverage
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
         with:
           files: build/coverage/clover.xml
           fail_ci_if_error: false
@@ -76,17 +80,19 @@ jobs:
     # Runs on main-branch pushes only; ~70s per run, too slow for per-PR blocking.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.4'
           extensions: dom, json, libxml, mbstring
           coverage: pcov
 
       - name: Install PHP dependencies
-        uses: ramsey/composer-install@v3
+        uses: ramsey/composer-install@a8d0d959dab41457692a5e2041bd9b757a119e3f # 3.2.1
 
       - name: Run Infection
         run: composer mutate
