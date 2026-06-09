@@ -50,7 +50,6 @@ use Prov\Relation\Usage;
  * @mago-ignore analysis:mixed-operand
  * @mago-ignore analysis:invalid-iterator
  * @mago-ignore analysis:less-specific-argument
- * @mago-ignore analysis:redundant-type-comparison
  */
 class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterface
 {

@@ -396,7 +396,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
         return [$id, $args, $attrs];
     }
 
-    private function readArgValue(): string|null|\DateTimeImmutable
+    private function readArgValue(): string|\DateTimeImmutable|null
     {
         $this->skip();
         if ($this->pos >= $this->len) {
