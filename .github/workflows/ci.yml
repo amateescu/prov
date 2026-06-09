@@ -36,13 +36,13 @@ jobs:
           dependency-versions: ${{ matrix.deps }}
 
       - name: Mago format check
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1 format --check
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.23.1 format --check
 
       - name: Mago lint
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1 lint --reporting-format=github
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.23.1 lint --reporting-format=github
 
       - name: Mago analyze
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1 analyze --reporting-format=github
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.23.1 analyze --reporting-format=github
 
       - name: Tests
         run: composer test
