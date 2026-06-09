@@ -31,18 +31,18 @@ jobs:
           coverage: none
 
       - name: Install PHP dependencies
-        uses: ramsey/composer-install@a8d0d959dab41457692a5e2041bd9b757a119e3f # 3.2.1
+        uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
         with:
           dependency-versions: ${{ matrix.deps }}
 
       - name: Mago format check
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.23.1 format --check
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.30.0 format --check
 
       - name: Mago lint
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.23.1 lint --reporting-format=github
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.30.0 lint --reporting-format=github
 
       - name: Mago analyze
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.23.1 analyze --reporting-format=github
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.30.0 analyze --reporting-format=github
 
       - name: Tests
         run: composer test
@@ -63,13 +63,13 @@ jobs:
           coverage: pcov
 
       - name: Install PHP dependencies
-        uses: ramsey/composer-install@a8d0d959dab41457692a5e2041bd9b757a119e3f # 3.2.1
+        uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
 
       - name: Run tests with coverage
         run: composer test:coverage
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: build/coverage/clover.xml
           fail_ci_if_error: false
@@ -92,7 +92,7 @@ jobs:
           coverage: pcov
 
       - name: Install PHP dependencies
-        uses: ramsey/composer-install@a8d0d959dab41457692a5e2041bd9b757a119e3f # 3.2.1
+        uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
 
       - name: Run Infection
         run: composer mutate
