@@ -22,6 +22,8 @@ use Prov\Relation\Usage;
 
 /**
  * Builds reverse-lookup indexes from a record list for efficient constraint checking.
+ *
+ * @internal
  */
 class RecordIndex
 {
@@ -45,18 +47,6 @@ class RecordIndex
 
     /** @var array<string, list<\Prov\Relation\End>> activity URI -> ends */
     private array $endsByActivity = [];
-
-    /** @var array<string, list<\Prov\Relation\Generation>> "entityUri|activityUri" -> generations */
-    private array $generationsByPair = [];
-
-    /** @var array<string, list<\Prov\Relation\Invalidation>> "entityUri|activityUri" -> invalidations */
-    private array $invalidationsByPair = [];
-
-    /** @var array<string, list<\Prov\Relation\Start>> "activityUri|starterUri" -> starts */
-    private array $startsByPair = [];
-
-    /** @var array<string, list<\Prov\Relation\End>> "activityUri|enderUri" -> ends */
-    private array $endsByPair = [];
 
     /** @var array<string, \Prov\Activity> URI -> \Prov\Activity */
     private array $activities = [];
@@ -116,12 +106,8 @@ class RecordIndex
 
             if ($record instanceof Generation) {
                 $eUri = $record->entity?->getUri();
-                $aUri = $record->activity?->getUri();
                 if ($eUri !== null) {
                     $this->generationsByEntity[$eUri][] = $record;
-                }
-                if ($eUri !== null && $aUri !== null) {
-                    $this->generationsByPair["{$eUri}|{$aUri}"][] = $record;
                 }
             } elseif ($record instanceof Usage) {
                 $eUri = $record->entity?->getUri();
@@ -130,26 +116,18 @@ class RecordIndex
                 }
             } elseif ($record instanceof Invalidation) {
                 $eUri = $record->entity?->getUri();
-                $aUri = $record->activity?->getUri();
                 if ($eUri !== null) {
                     $this->invalidationsByEntity[$eUri][] = $record;
                 }
-                if ($eUri !== null && $aUri !== null) {
-                    $this->invalidationsByPair["{$eUri}|{$aUri}"][] = $record;
-                }
             } elseif ($record instanceof Start) {
                 $aUri = $record->activity?->getUri();
-                $sUri = $record->starter?->getUri() ?? '_';
                 if ($aUri !== null) {
                     $this->startsByActivity[$aUri][] = $record;
-                    $this->startsByPair["{$aUri}|{$sUri}"][] = $record;
                 }
             } elseif ($record instanceof End) {
                 $aUri = $record->activity?->getUri();
-                $eUri = $record->ender?->getUri() ?? '_';
                 if ($aUri !== null) {
                     $this->endsByActivity[$aUri][] = $record;
-                    $this->endsByPair["{$aUri}|{$eUri}"][] = $record;
                 }
             } elseif ($record instanceof Specialization) {
                 $this->specializations[] = $record;
@@ -206,30 +184,6 @@ class RecordIndex
     public function getEndsForActivity(string $uri): array
     {
         return $this->endsByActivity[$uri] ?? [];
-    }
-
-    /** @return list<\Prov\Relation\Generation> */
-    public function getGenerationsForPair(string $entityUri, string $activityUri): array
-    {
-        return $this->generationsByPair["{$entityUri}|{$activityUri}"] ?? [];
-    }
-
-    /** @return list<\Prov\Relation\Invalidation> */
-    public function getInvalidationsForPair(string $entityUri, string $activityUri): array
-    {
-        return $this->invalidationsByPair["{$entityUri}|{$activityUri}"] ?? [];
-    }
-
-    /** @return list<\Prov\Relation\Start> */
-    public function getStartsForPair(string $activityUri, string $starterUri): array
-    {
-        return $this->startsByPair["{$activityUri}|{$starterUri}"] ?? [];
-    }
-
-    /** @return list<\Prov\Relation\End> */
-    public function getEndsForPair(string $activityUri, string $enderUri): array
-    {
-        return $this->endsByPair["{$activityUri}|{$enderUri}"] ?? [];
     }
 
     /** @return list<\Prov\Relation\Specialization> */

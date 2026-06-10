@@ -734,8 +734,15 @@ class ProvNDeserializer implements ProvDeserializerInterface
         if ($this->peek() === "'") {
             $this->advance();
             $result = '';
-            while ($this->pos < $this->len && $this->input[$this->pos] !== "'") {
-                if ($this->input[$this->pos] === '\\' && ($this->pos + 1) < $this->len) {
+            while ($this->pos < $this->len) {
+                $run = strcspn($this->input, "'\\", $this->pos);
+                $result .= substr($this->input, $this->pos, $run);
+                $this->pos += $run;
+                if ($this->pos >= $this->len || $this->input[$this->pos] === "'") {
+                    break;
+                }
+                // Preserve the backslash escape verbatim; resolve() decodes it.
+                if (($this->pos + 1) < $this->len) {
                     $result .= $this->input[$this->pos] . $this->input[$this->pos + 1];
                     $this->pos += 2;
                 } else {
@@ -833,14 +840,20 @@ class ProvNDeserializer implements ProvDeserializerInterface
         $this->advance(); // opening "
         $result = '';
         while ($this->pos < $this->len) {
-            $ch = $this->input[$this->pos];
-            if ($ch === '"') {
+            // Copy the run up to the next quote or backslash in one operation.
+            $run = strcspn($this->input, "\"\\", $this->pos);
+            $result .= substr($this->input, $this->pos, $run);
+            $this->pos += $run;
+            if ($this->pos >= $this->len) {
+                break;
+            }
+            if ($this->input[$this->pos] === '"') {
                 $this->advance();
                 return $result;
             }
-            if ($ch === '\\' && ($this->pos + 1) < $this->len) {
-                $this->advance();
-                $esc = $this->input[$this->pos];
+            // Backslash escape.
+            if (($this->pos + 1) < $this->len) {
+                $esc = $this->input[$this->pos + 1];
                 $result .= match ($esc) {
                     'n' => "\n",
                     'r' => "\r",
@@ -849,33 +862,25 @@ class ProvNDeserializer implements ProvDeserializerInterface
                     '"' => '"',
                     default => '\\' . $esc,
                 };
+                $this->pos += 2;
+            } else {
+                $result .= '\\';
                 $this->advance();
-                continue;
             }
-            $result .= $ch;
-            $this->advance();
         }
         throw $this->err('Unterminated string literal.');
     }
 
     private function readTripleQuotedString(): string
     {
-        $this->pos += 3; // skip """
-        $result = '';
-        while ($this->pos < $this->len) {
-            if (
-                $this->input[$this->pos] === '"'
-                && ($this->pos + 2) < $this->len
-                && $this->input[$this->pos + 1] === '"'
-                && $this->input[$this->pos + 2] === '"'
-            ) {
-                $this->pos += 3;
-                return $result;
-            }
-            $result .= $this->input[$this->pos];
-            $this->advance();
+        $this->pos += 3; // skip opening """
+        $end = strpos($this->input, '"""', $this->pos);
+        if ($end === false) {
+            throw $this->err('Unterminated triple-quoted string.');
         }
-        throw $this->err('Unterminated triple-quoted string.');
+        $result = substr($this->input, $this->pos, $end - $this->pos);
+        $this->pos = $end + 3;
+        return $result;
     }
 
     // --- Low-level tokenizer ---
