@@ -50,6 +50,7 @@ use Prov\Relation\Usage;
  * @mago-ignore analysis:mixed-operand
  * @mago-ignore analysis:invalid-iterator
  * @mago-ignore analysis:less-specific-argument
+ * @mago-ignore analysis:less-specific-nested-argument-type
  */
 class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterface
 {
@@ -939,25 +940,27 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             return null;
         }
 
-        $result = new Attributes();
+        // Accumulate into the raw URI-keyed shape and build Attributes once. Using
+        // with() here would copy the backing array on every value (O(n^2) per record).
+        $data = [];
         foreach ($attrs as $key => $value) {
-            $resolvedKey = $nsManager->resolve($key);
+            $uri = $nsManager->resolve($key)->getUri();
             if (is_array($value) && isset($value['$'])) {
-                $result = $result->with($resolvedKey, $this->deserializeTypedValue($value, $nsManager));
+                $data[$uri][] = $this->deserializeTypedValue($value, $nsManager);
             } elseif (is_array($value) && !isset($value['$'])) {
                 foreach ($value as $item) {
                     if (is_array($item) && isset($item['$'])) {
-                        $result = $result->with($resolvedKey, $this->deserializeTypedValue($item, $nsManager));
+                        $data[$uri][] = $this->deserializeTypedValue($item, $nsManager);
                     } else {
-                        $result = $result->with($resolvedKey, $item);
+                        $data[$uri][] = $item;
                     }
                 }
             } else {
-                $result = $result->with($resolvedKey, $value);
+                $data[$uri][] = $value;
             }
         }
 
-        return $result;
+        return new Attributes($data);
     }
 
     private function deserializeTypedValue(array $value, NamespaceManager $nsManager): QualifiedName|Literal

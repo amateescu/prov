@@ -908,7 +908,9 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         NamespaceManager $nsManager,
         array $skipLocalNames = [],
     ): ?Attributes {
-        $attrs = new Attributes();
+        // Accumulate into the raw URI-keyed shape and build Attributes once, rather than
+        // calling with() per child (which copies the backing array, O(n^2) per record).
+        $data = [];
         $hasAny = false;
 
         foreach ($parent->childNodes as $child) {
@@ -937,11 +939,11 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             $key = $nsManager->resolve($keyStr);
             $value = $this->deserializeAttrValue($child, $nsManager);
 
-            $attrs = $attrs->with($key, $value);
+            $data[$key->getUri()][] = $value;
             $hasAny = true;
         }
 
-        return $hasAny ? $attrs : null;
+        return $hasAny ? new Attributes($data) : null;
     }
 
     private function deserializeAttrValue(\DOMElement $el, NamespaceManager $nsManager): QualifiedName|Literal|string
