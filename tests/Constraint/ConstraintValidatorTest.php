@@ -511,4 +511,31 @@ final class ConstraintValidatorTest extends TestCase
         $violations = $this->validate($b);
         $this->assertSame(2, count($violations->getViolationsByConstraint(52)));
     }
+
+    public function testConstraint53FlagsSharedEventIdentifierOnce(): void
+    {
+        // One identifier used for both a generation and a usage is a single impossible
+        // overlap, reported exactly once rather than once per record carrying it.
+        $b = $this->buildDoc();
+        $b->entity('ex:e');
+        $b->activity('ex:a');
+        $b->wasGeneratedBy(identifier: 'ex:ev', entity: 'ex:e', activity: 'ex:a');
+        $b->used(identifier: 'ex:ev', activity: 'ex:a', entity: 'ex:e');
+
+        $this->assertCount(1, $this->validate($b)->getViolationsByConstraint(53));
+    }
+
+    public function testConstraint53IgnoresNonEventRelationsSharingAnIdentifier(): void
+    {
+        // A derivation and an attribution are not instantaneous events, so sharing an
+        // identifier is not an impossible property overlap.
+        $b = $this->buildDoc();
+        $b->entity('ex:e1');
+        $b->entity('ex:e2');
+        $b->agent('ex:ag');
+        $b->wasDerivedFrom(identifier: 'ex:x', generatedEntity: 'ex:e1', usedEntity: 'ex:e2');
+        $b->wasAttributedTo(identifier: 'ex:x', entity: 'ex:e1', agent: 'ex:ag');
+
+        $this->assertCount(0, $this->validate($b)->getViolationsByConstraint(53));
+    }
 }

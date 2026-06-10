@@ -638,7 +638,7 @@ class JsonLdSerializer implements ProvSerializerInterface
     private function formatDateTime(\DateTimeImmutable $dt): array
     {
         return [
-            '@value' => $dt->format(\DateTimeInterface::ATOM),
+            '@value' => Literal::formatDateTime($dt),
             '@type' => 'xsd:dateTime',
         ];
     }

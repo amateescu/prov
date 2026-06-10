@@ -66,6 +66,7 @@ class ProvNSerializer implements ProvSerializerInterface
         $lines[] = 'document';
 
         foreach ($document->namespaces as $ns) {
+            $this->assertSafeNamespace($ns);
             if ($ns->prefix === 'default') {
                 if ($this->includeDefaultNamespace) {
                     $lines[] = $indent . "default <{$ns->uri}>";
@@ -110,9 +111,10 @@ class ProvNSerializer implements ProvSerializerInterface
 
         $indent = $this->indentPrefix();
         $indent2 = $indent . $indent;
-        $lines[] = $indent . "bundle {$bundle->identifier}";
+        $lines[] = $indent . 'bundle ' . $this->formatQualifiedName($bundle->identifier);
 
         foreach ($bundle->namespaces as $ns) {
+            $this->assertSafeNamespace($ns);
             if ($ns->prefix === 'default') {
                 if ($this->includeDefaultNamespace) {
                     $lines[] = $indent2 . "default <{$ns->uri}>";
@@ -181,7 +183,7 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeEntity(Entity $entity, NamespaceManager $nsManager): string
     {
-        $id = $entity->identifier !== null ? (string) $entity->identifier : '-';
+        $id = $this->formatOptionalId($entity->identifier);
         if ($entity->attributes->isEmpty()) {
             return "entity({$id})";
         }
@@ -190,11 +192,11 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeActivity(Activity $activity, NamespaceManager $nsManager): string
     {
-        $id = $activity->identifier !== null ? (string) $activity->identifier : '-';
+        $id = $this->formatOptionalId($activity->identifier);
         $time = '';
         if ($activity->startTime !== null || $activity->endTime !== null) {
-            $start = $activity->startTime !== null ? $activity->startTime->format(\DateTimeInterface::ATOM) : '-';
-            $end = $activity->endTime !== null ? $activity->endTime->format(\DateTimeInterface::ATOM) : '-';
+            $start = $activity->startTime !== null ? Literal::formatDateTime($activity->startTime) : '-';
+            $end = $activity->endTime !== null ? Literal::formatDateTime($activity->endTime) : '-';
             $time = ", {$start}, {$end}";
         }
         if ($activity->attributes->isEmpty()) {
@@ -205,7 +207,7 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeAgent(Agent $agent, NamespaceManager $nsManager): string
     {
-        $id = $agent->identifier !== null ? (string) $agent->identifier : '-';
+        $id = $this->formatOptionalId($agent->identifier);
         if ($agent->attributes->isEmpty()) {
             return "agent({$id})";
         }
@@ -214,11 +216,11 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeGeneration(Generation $gen, NamespaceManager $nsManager): string
     {
-        $entity = $gen->entity !== null ? (string) $gen->entity : '-';
-        $activity = $gen->activity !== null ? (string) $gen->activity : '-';
-        $time = $gen->time !== null ? $gen->time->format(\DateTimeInterface::ATOM) : '-';
+        $entity = $this->formatOptionalId($gen->entity);
+        $activity = $this->formatOptionalId($gen->activity);
+        $time = $gen->time !== null ? Literal::formatDateTime($gen->time) : '-';
         $prefix = $gen->identifier !== null
-            ? 'wasGeneratedBy(' . (string) $gen->identifier . "; {$entity}, {$activity}, {$time}"
+            ? 'wasGeneratedBy(' . $this->formatQualifiedName($gen->identifier) . "; {$entity}, {$activity}, {$time}"
             : "wasGeneratedBy({$entity}, {$activity}, {$time}";
         if ($gen->attributes->isEmpty()) {
             return $prefix . ')';
@@ -228,11 +230,11 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeUsage(Usage $usage, NamespaceManager $nsManager): string
     {
-        $activity = $usage->activity !== null ? (string) $usage->activity : '-';
-        $entity = $usage->entity !== null ? (string) $usage->entity : '-';
-        $time = $usage->time !== null ? $usage->time->format(\DateTimeInterface::ATOM) : '-';
+        $activity = $this->formatOptionalId($usage->activity);
+        $entity = $this->formatOptionalId($usage->entity);
+        $time = $usage->time !== null ? Literal::formatDateTime($usage->time) : '-';
         $prefix = $usage->identifier !== null
-            ? 'used(' . (string) $usage->identifier . "; {$activity}, {$entity}, {$time}"
+            ? 'used(' . $this->formatQualifiedName($usage->identifier) . "; {$activity}, {$entity}, {$time}"
             : "used({$activity}, {$entity}, {$time}";
         if ($usage->attributes->isEmpty()) {
             return $prefix . ')';
@@ -242,10 +244,10 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeCommunication(Communication $comm, NamespaceManager $nsManager): string
     {
-        $informed = $comm->informed !== null ? (string) $comm->informed : '-';
-        $informant = $comm->informant !== null ? (string) $comm->informant : '-';
+        $informed = $this->formatOptionalId($comm->informed);
+        $informant = $this->formatOptionalId($comm->informant);
         $prefix = $comm->identifier !== null
-            ? 'wasInformedBy(' . (string) $comm->identifier . "; {$informed}, {$informant}"
+            ? 'wasInformedBy(' . $this->formatQualifiedName($comm->identifier) . "; {$informed}, {$informant}"
             : "wasInformedBy({$informed}, {$informant}";
         return $comm->attributes->isEmpty()
             ? $prefix . ')'
@@ -254,12 +256,14 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeStart(Start $start, NamespaceManager $nsManager): string
     {
-        $activity = $start->activity !== null ? (string) $start->activity : '-';
-        $trigger = $start->trigger !== null ? (string) $start->trigger : '-';
-        $starter = $start->starter !== null ? (string) $start->starter : '-';
-        $time = $start->time !== null ? $start->time->format(\DateTimeInterface::ATOM) : '-';
+        $activity = $this->formatOptionalId($start->activity);
+        $trigger = $this->formatOptionalId($start->trigger);
+        $starter = $this->formatOptionalId($start->starter);
+        $time = $start->time !== null ? Literal::formatDateTime($start->time) : '-';
         $prefix = $start->identifier !== null
-            ? 'wasStartedBy(' . (string) $start->identifier . "; {$activity}, {$trigger}, {$starter}, {$time}"
+            ? 'wasStartedBy('
+            . $this->formatQualifiedName($start->identifier)
+            . "; {$activity}, {$trigger}, {$starter}, {$time}"
             : "wasStartedBy({$activity}, {$trigger}, {$starter}, {$time}";
         return $start->attributes->isEmpty()
             ? $prefix . ')'
@@ -268,12 +272,14 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeEnd(End $end, NamespaceManager $nsManager): string
     {
-        $activity = $end->activity !== null ? (string) $end->activity : '-';
-        $trigger = $end->trigger !== null ? (string) $end->trigger : '-';
-        $ender = $end->ender !== null ? (string) $end->ender : '-';
-        $time = $end->time !== null ? $end->time->format(\DateTimeInterface::ATOM) : '-';
+        $activity = $this->formatOptionalId($end->activity);
+        $trigger = $this->formatOptionalId($end->trigger);
+        $ender = $this->formatOptionalId($end->ender);
+        $time = $end->time !== null ? Literal::formatDateTime($end->time) : '-';
         $prefix = $end->identifier !== null
-            ? 'wasEndedBy(' . (string) $end->identifier . "; {$activity}, {$trigger}, {$ender}, {$time}"
+            ? 'wasEndedBy('
+            . $this->formatQualifiedName($end->identifier)
+            . "; {$activity}, {$trigger}, {$ender}, {$time}"
             : "wasEndedBy({$activity}, {$trigger}, {$ender}, {$time}";
         return $end->attributes->isEmpty()
             ? $prefix . ')'
@@ -282,11 +288,11 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeInvalidation(Invalidation $inv, NamespaceManager $nsManager): string
     {
-        $entity = $inv->entity !== null ? (string) $inv->entity : '-';
-        $activity = $inv->activity !== null ? (string) $inv->activity : '-';
-        $time = $inv->time !== null ? $inv->time->format(\DateTimeInterface::ATOM) : '-';
+        $entity = $this->formatOptionalId($inv->entity);
+        $activity = $this->formatOptionalId($inv->activity);
+        $time = $inv->time !== null ? Literal::formatDateTime($inv->time) : '-';
         $prefix = $inv->identifier !== null
-            ? 'wasInvalidatedBy(' . (string) $inv->identifier . "; {$entity}, {$activity}, {$time}"
+            ? 'wasInvalidatedBy(' . $this->formatQualifiedName($inv->identifier) . "; {$entity}, {$activity}, {$time}"
             : "wasInvalidatedBy({$entity}, {$activity}, {$time}";
         return $inv->attributes->isEmpty()
             ? $prefix . ')'
@@ -295,14 +301,14 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeDerivation(Derivation $der, NamespaceManager $nsManager): string
     {
-        $generatedEntity = $der->generatedEntity !== null ? (string) $der->generatedEntity : '-';
-        $usedEntity = $der->usedEntity !== null ? (string) $der->usedEntity : '-';
-        $activity = $der->activity !== null ? (string) $der->activity : '-';
-        $generation = $der->generation !== null ? (string) $der->generation : '-';
-        $usage = $der->usage !== null ? (string) $der->usage : '-';
+        $generatedEntity = $this->formatOptionalId($der->generatedEntity);
+        $usedEntity = $this->formatOptionalId($der->usedEntity);
+        $activity = $this->formatOptionalId($der->activity);
+        $generation = $this->formatOptionalId($der->generation);
+        $usage = $this->formatOptionalId($der->usage);
         $prefix = $der->identifier !== null
             ? 'wasDerivedFrom('
-            . (string) $der->identifier
+            . $this->formatQualifiedName($der->identifier)
             . "; {$generatedEntity}, {$usedEntity}, {$activity}, {$generation}, {$usage}"
             : "wasDerivedFrom({$generatedEntity}, {$usedEntity}, {$activity}, {$generation}, {$usage}";
         return $der->attributes->isEmpty()
@@ -312,10 +318,10 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeAttribution(Attribution $attr, NamespaceManager $nsManager): string
     {
-        $entity = $attr->entity !== null ? (string) $attr->entity : '-';
-        $agent = $attr->agent !== null ? (string) $attr->agent : '-';
+        $entity = $this->formatOptionalId($attr->entity);
+        $agent = $this->formatOptionalId($attr->agent);
         $prefix = $attr->identifier !== null
-            ? 'wasAttributedTo(' . (string) $attr->identifier . "; {$entity}, {$agent}"
+            ? 'wasAttributedTo(' . $this->formatQualifiedName($attr->identifier) . "; {$entity}, {$agent}"
             : "wasAttributedTo({$entity}, {$agent}";
         return $attr->attributes->isEmpty()
             ? $prefix . ')'
@@ -324,11 +330,11 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeAssociation(Association $assoc, NamespaceManager $nsManager): string
     {
-        $activity = $assoc->activity !== null ? (string) $assoc->activity : '-';
-        $agent = $assoc->agent !== null ? (string) $assoc->agent : '-';
-        $plan = $assoc->plan !== null ? (string) $assoc->plan : '-';
+        $activity = $this->formatOptionalId($assoc->activity);
+        $agent = $this->formatOptionalId($assoc->agent);
+        $plan = $this->formatOptionalId($assoc->plan);
         $prefix = $assoc->identifier !== null
-            ? 'wasAssociatedWith(' . (string) $assoc->identifier . "; {$activity}, {$agent}, {$plan}"
+            ? 'wasAssociatedWith(' . $this->formatQualifiedName($assoc->identifier) . "; {$activity}, {$agent}, {$plan}"
             : "wasAssociatedWith({$activity}, {$agent}, {$plan}";
         return $assoc->attributes->isEmpty()
             ? $prefix . ')'
@@ -337,11 +343,13 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeDelegation(Delegation $del, NamespaceManager $nsManager): string
     {
-        $delegate = $del->delegate !== null ? (string) $del->delegate : '-';
-        $responsible = $del->responsible !== null ? (string) $del->responsible : '-';
-        $activity = $del->activity !== null ? (string) $del->activity : '-';
+        $delegate = $this->formatOptionalId($del->delegate);
+        $responsible = $this->formatOptionalId($del->responsible);
+        $activity = $this->formatOptionalId($del->activity);
         $prefix = $del->identifier !== null
-            ? 'actedOnBehalfOf(' . (string) $del->identifier . "; {$delegate}, {$responsible}, {$activity}"
+            ? 'actedOnBehalfOf('
+            . $this->formatQualifiedName($del->identifier)
+            . "; {$delegate}, {$responsible}, {$activity}"
             : "actedOnBehalfOf({$delegate}, {$responsible}, {$activity}";
         return $del->attributes->isEmpty()
             ? $prefix . ')'
@@ -350,10 +358,10 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeInfluence(Influence $inf, NamespaceManager $nsManager): string
     {
-        $influencee = $inf->influencee !== null ? (string) $inf->influencee : '-';
-        $influencer = $inf->influencer !== null ? (string) $inf->influencer : '-';
+        $influencee = $this->formatOptionalId($inf->influencee);
+        $influencer = $this->formatOptionalId($inf->influencer);
         $prefix = $inf->identifier !== null
-            ? 'wasInfluencedBy(' . (string) $inf->identifier . "; {$influencee}, {$influencer}"
+            ? 'wasInfluencedBy(' . $this->formatQualifiedName($inf->identifier) . "; {$influencee}, {$influencer}"
             : "wasInfluencedBy({$influencee}, {$influencer}";
         return $inf->attributes->isEmpty()
             ? $prefix . ')'
@@ -362,8 +370,8 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeSpecialization(Specialization $spec, NamespaceManager $nsManager): string
     {
-        $specific = $spec->specificEntity !== null ? (string) $spec->specificEntity : '-';
-        $general = $spec->generalEntity !== null ? (string) $spec->generalEntity : '-';
+        $specific = $this->formatOptionalId($spec->specificEntity);
+        $general = $this->formatOptionalId($spec->generalEntity);
         return $spec->attributes->isEmpty()
             ? "specializationOf({$specific}, {$general})"
             : "specializationOf({$specific}, {$general}" . $this->formatAttributes($spec->attributes, $nsManager) . ')';
@@ -371,8 +379,8 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeAlternate(Alternate $alt, NamespaceManager $nsManager): string
     {
-        $a1 = $alt->alternate1 !== null ? (string) $alt->alternate1 : '-';
-        $a2 = $alt->alternate2 !== null ? (string) $alt->alternate2 : '-';
+        $a1 = $this->formatOptionalId($alt->alternate1);
+        $a2 = $this->formatOptionalId($alt->alternate2);
         return $alt->attributes->isEmpty()
             ? "alternateOf({$a1}, {$a2})"
             : "alternateOf({$a1}, {$a2}" . $this->formatAttributes($alt->attributes, $nsManager) . ')';
@@ -380,8 +388,8 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeMembership(Membership $mem, NamespaceManager $nsManager): string
     {
-        $collection = $mem->collection !== null ? (string) $mem->collection : '-';
-        $entity = $mem->entity !== null ? (string) $mem->entity : '-';
+        $collection = $this->formatOptionalId($mem->collection);
+        $entity = $this->formatOptionalId($mem->entity);
         return $mem->attributes->isEmpty()
             ? "hadMember({$collection}, {$entity})"
             : "hadMember({$collection}, {$entity}" . $this->formatAttributes($mem->attributes, $nsManager) . ')';
@@ -389,9 +397,9 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeMention(Mention $men, NamespaceManager $nsManager): string
     {
-        $specific = $men->specificEntity !== null ? (string) $men->specificEntity : '-';
-        $general = $men->generalEntity !== null ? (string) $men->generalEntity : '-';
-        $bundle = $men->bundle !== null ? (string) $men->bundle : '-';
+        $specific = $this->formatOptionalId($men->specificEntity);
+        $general = $this->formatOptionalId($men->generalEntity);
+        $bundle = $this->formatOptionalId($men->bundle);
         return $men->attributes->isEmpty()
             ? "mentionOf({$specific}, {$general}, {$bundle})"
             : "mentionOf({$specific}, {$general}, {$bundle}"
@@ -405,7 +413,7 @@ class ProvNSerializer implements ProvSerializerInterface
         $lines = [];
         foreach ($dm->keyEntityPairs as $pair) {
             $dict = $this->formatOptionalId($dm->dictionary);
-            $entity = $pair->entity !== null ? (string) $pair->entity : '-';
+            $entity = $this->formatOptionalId($pair->entity);
             $key = $this->formatDictKey($pair->key);
             $lines[] = "prov:hadDictionaryMember({$dict}, {$entity}, {$key})";
         }
@@ -420,7 +428,11 @@ class ProvNSerializer implements ProvSerializerInterface
         $attrs = $this->formatAttributes($di->attributes, $nsManager);
 
         if ($di->identifier !== null) {
-            return "prov:derivedByInsertionFrom({$di->identifier}; {$after}, {$before}, {$set}{$attrs})";
+            return (
+                'prov:derivedByInsertionFrom('
+                . $this->formatQualifiedName($di->identifier)
+                . "; {$after}, {$before}, {$set}{$attrs})"
+            );
         }
         return "prov:derivedByInsertionFrom({$after}, {$before}, {$set}{$attrs})";
     }
@@ -433,7 +445,11 @@ class ProvNSerializer implements ProvSerializerInterface
         $attrs = $this->formatAttributes($dr->attributes, $nsManager);
 
         if ($dr->identifier !== null) {
-            return "prov:derivedByRemovalFrom({$dr->identifier}; {$after}, {$before}, {$set}{$attrs})";
+            return (
+                'prov:derivedByRemovalFrom('
+                . $this->formatQualifiedName($dr->identifier)
+                . "; {$after}, {$before}, {$set}{$attrs})"
+            );
         }
         return "prov:derivedByRemovalFrom({$after}, {$before}, {$set}{$attrs})";
     }
@@ -452,7 +468,7 @@ class ProvNSerializer implements ProvSerializerInterface
         $items = [];
         foreach ($pairs as $pair) {
             $key = $this->formatDictKey($pair->key);
-            $entity = $pair->entity !== null ? (string) $pair->entity : '-';
+            $entity = $this->formatOptionalId($pair->entity);
             $items[] = "({$key}, {$entity})";
         }
         return '{' . implode(', ', $items) . '}';
@@ -491,9 +507,11 @@ class ProvNSerializer implements ProvSerializerInterface
             $type = isset($key['type']) && is_string($key['type']) ? $key['type'] : null;
             $lang = isset($key['lang']) && is_string($key['lang']) ? $key['lang'] : null;
             if ($type !== null) {
+                $this->assertSafeAttributeKey($type);
                 return '"' . $this->escapeString($val) . '" %% ' . $type;
             }
             if ($lang !== null) {
+                $this->assertSafeLangTag($lang);
                 return '"' . $this->escapeString($val) . '"@' . $lang;
             }
             return '"' . $this->escapeString($val) . '"';
@@ -504,9 +522,24 @@ class ProvNSerializer implements ProvSerializerInterface
         return '-';
     }
 
+    /**
+     * Stringifies an identifier for emission, rejecting any that PROV-N cannot represent.
+     * This is the single chokepoint through which every qualified name reaches the output,
+     * so validation happens inline as the document is written (no separate pass).
+     */
+    private function formatQualifiedName(QualifiedName $qn): string
+    {
+        if ($this->hasUnsafeChars($qn->namespace->prefix) || $this->hasUnsafeChars($qn->localPart)) {
+            throw new \InvalidArgumentException(
+                "Identifier '{$qn}' contains a character that cannot be represented in PROV-N.",
+            );
+        }
+        return (string) $qn;
+    }
+
     private function formatOptionalId(?QualifiedName $id): string
     {
-        return $id !== null ? (string) $id : '-';
+        return $id !== null ? $this->formatQualifiedName($id) : '-';
     }
 
     private function formatAttributes(Attributes $attributes, NamespaceManager $nsManager): string
@@ -518,6 +551,7 @@ class ProvNSerializer implements ProvSerializerInterface
         $pairs = [];
         foreach ($attributes->all() as $uri => $values) {
             $key = $nsManager->uriToPrefixed($uri);
+            $this->assertSafeAttributeKey($key);
             foreach ($values as $value) {
                 $formattedValue = $this->formatAttributeValue($value);
                 $pairs[] = "{$key} = {$formattedValue}";
@@ -530,15 +564,16 @@ class ProvNSerializer implements ProvSerializerInterface
     private function formatAttributeValue(QualifiedName|Literal|string|int|float|bool $value): string
     {
         if ($value instanceof QualifiedName) {
-            return "'" . (string) $value . "'";
+            return "'" . $this->formatQualifiedName($value) . "'";
         }
 
         if ($value instanceof Literal) {
             $str = '"' . $this->escapeString($value->value) . '"';
             if ($value->datatype !== null) {
-                $str .= ' %% ' . (string) $value->datatype;
+                $str .= ' %% ' . $this->formatQualifiedName($value->datatype);
             }
             if ($value->languageTag !== null) {
+                $this->assertSafeLangTag($value->languageTag);
                 $str .= "@{$value->languageTag}";
             }
             return $str;
@@ -553,10 +588,84 @@ class ProvNSerializer implements ProvSerializerInterface
         }
 
         if (is_float($value)) {
-            return "\"{$value}\" %% xsd:float";
+            return '"' . Literal::formatFloat($value) . '" %% xsd:float';
         }
 
         return '"' . $this->escapeString($value) . '"';
+    }
+
+    /**
+     * PROV-N delimiter, quoting and whitespace characters. A qualified name or prefix
+     * containing any of these would let crafted input break out of its token and inject
+     * records, so a document carrying one is rejected rather than serialized.
+     */
+    private const string PROVN_UNSAFE_PUNCTUATION = "()[]{}<>\"'=,;:|^`\\";
+
+    private function assertSafeNamespace(\Prov\Identifier\ProvNamespace $ns): void
+    {
+        if ($ns->prefix !== 'default' && $this->hasUnsafeChars($ns->prefix)) {
+            throw new \InvalidArgumentException("Namespace prefix '{$ns->prefix}' cannot be represented in PROV-N.");
+        }
+        if ($this->isUnsafeUri($ns->uri)) {
+            throw new \InvalidArgumentException("Namespace URI '{$ns->uri}' cannot be represented in PROV-N.");
+        }
+    }
+
+    private function assertSafeAttributeKey(string $key): void
+    {
+        // The prefix ":" and URI characters are fine before " = ", but list or quoting
+        // delimiters and whitespace/control bytes (except NUL) would break the attribute
+        // list. Built once; backslash-escaped delimiters are read back verbatim, so drop
+        // "\X" pairs first when present.
+        static $unsafe = '';
+        if ($unsafe === '') {
+            $unsafe = "()[]{}<>\"'=,;";
+            for ($byte = 1; $byte <= 0x20; $byte++) {
+                $unsafe .= chr($byte);
+            }
+            $unsafe .= "\x7f";
+        }
+        $bare = $key;
+        if (str_contains($bare, '\\')) {
+            $bare = (string) preg_replace('/\\\\./s', '', $bare);
+        }
+        if (strpbrk($bare, $unsafe) !== false || str_contains($bare, "\x00")) {
+            throw new \InvalidArgumentException("Attribute key '{$key}' cannot be represented in PROV-N.");
+        }
+    }
+
+    private function assertSafeLangTag(string $lang): void
+    {
+        if (preg_match('/^[A-Za-z0-9-]+$/', $lang) !== 1) {
+            throw new \InvalidArgumentException("Language tag '{$lang}' is not a valid PROV-N language tag.");
+        }
+    }
+
+    private function hasUnsafeChars(string $text): bool
+    {
+        // Structural punctuation plus every whitespace/control byte except NUL (which a
+        // C-string needle cannot carry, so str_contains() checks it separately). Built once.
+        static $unsafe = '';
+        if ($unsafe === '') {
+            $unsafe = self::PROVN_UNSAFE_PUNCTUATION;
+            for ($byte = 1; $byte <= 0x20; $byte++) {
+                $unsafe .= chr($byte);
+            }
+            $unsafe .= "\x7f";
+        }
+        // PROV-N permits delimiter characters in a local name when backslash-escaped (the
+        // parser reads them back verbatim); strip "\X" pairs first, but only when present.
+        if (str_contains($text, '\\')) {
+            $text = (string) preg_replace('/\\\\./s', '', $text);
+        }
+        return strpbrk($text, $unsafe) !== false || str_contains($text, "\x00");
+    }
+
+    private function isUnsafeUri(string $uri): bool
+    {
+        // A namespace URI sits inside "<...>", so only angle brackets, double quotes,
+        // whitespace and control characters can break out; other URI punctuation is fine.
+        return strpbrk($uri, '<>"') !== false || preg_match('/[\x00-\x20\x7f]/', $uri) === 1;
     }
 
     private function escapeString(string $s): string

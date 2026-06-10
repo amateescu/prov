@@ -179,9 +179,13 @@ class ConstraintValidator
         }
     }
 
-    /** Constraint 53: Single event can't be both generation and usage (or other conflicting event types). */
+    /** Constraint 53: one identifier can't denote two distinct instantaneous events. */
     private function checkConstraint53(RecordIndex $index, ConstraintViolationList $violations): void
     {
+        // Only the instantaneous events count: a non-event relation (e.g. a derivation or
+        // attribution) is not an event and may legitimately share an identifier with one.
+        $eventClasses = [Generation::class, Usage::class, Start::class, End::class, Invalidation::class];
+        $seen = [];
         foreach ($index->getRecords() as $record) {
             if (!$record instanceof ProvRelation) {
                 continue;
@@ -191,18 +195,18 @@ class ConstraintValidator
                 continue;
             }
             $uri = $identifier->getUri();
-            $types = $index->getEventTypes($uri);
-            $uniqueTypes = array_unique($types);
-            if (count($uniqueTypes) > 1) {
+            // Report each conflicting identifier once, not once per record carrying it.
+            if (isset($seen[$uri])) {
+                continue;
+            }
+            $seen[$uri] = true;
+            $types = array_values(array_unique(array_intersect($index->getEventTypes($uri), $eventClasses)));
+            if (count($types) > 1) {
                 $violations->add(
                     new ConstraintViolation(
                         ConstraintId::ImpossiblePropertyOverlap,
                         "Identifier '{$uri}' is used for multiple event types: "
-                            . implode(', ', array_map(static fn($c) => basename(str_replace(
-                                '\\',
-                                '/',
-                                $c,
-                            )), $uniqueTypes)),
+                            . implode(', ', array_map(static fn($c) => basename(str_replace('\\', '/', $c)), $types)),
                         $uri,
                     ),
                 );

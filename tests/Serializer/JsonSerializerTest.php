@@ -242,14 +242,17 @@ final class JsonSerializerTest extends TestCase
         $this->assertCount(1, $doc->bundles[0]->entities);
     }
 
-    public function testDeserializeBlankNodeBecomesNull(): void
+    public function testDeserializeBlankNodePreservesLabel(): void
     {
         $json = '{"prefix":{"ex":"http://example.org/"},"wasGeneratedBy":{"_:blank1":{"prov:entity":"ex:e1"}}}';
         $doc = $this->serializer->deserialize($json);
 
         $gens = $doc->getRecordsByType(Generation::class);
         $this->assertCount(1, $gens);
-        $this->assertNull($gens[0]->identifier);
+        // A blank-node identifier round-trips as a "_:" QualifiedName, preserving the
+        // label so the node can be referenced, rather than collapsing to an anonymous null.
+        $this->assertNotNull($gens[0]->identifier);
+        $this->assertSame('_:blank1', $gens[0]->identifier->getUri());
     }
 
     public function testDeserializeLiteralAttribute(): void
