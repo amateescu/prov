@@ -55,22 +55,22 @@ readonly class Literal implements \Stringable
         return new self($value ? 'true' : 'false', ProvNamespace::xsd()->qualifiedName('boolean'));
     }
 
-    /** Literal typed as `xsd:dateTime`, formatted in ISO 8601 / ATOM form. */
+    /** Literal typed as `xsd:dateTime`, including sub-second precision when present. */
     public static function dateTime(\DateTimeImmutable $value): self
     {
-        return new self($value->format(\DateTimeInterface::ATOM), ProvNamespace::xsd()->qualifiedName('dateTime'));
+        return new self(self::formatDateTime($value), ProvNamespace::xsd()->qualifiedName('dateTime'));
     }
 
     /** Literal typed as `xsd:float`. */
     public static function float(float $value): self
     {
-        return new self((string) $value, ProvNamespace::xsd()->qualifiedName('float'));
+        return new self(self::formatFloat($value), ProvNamespace::xsd()->qualifiedName('float'));
     }
 
     /** Literal typed as `xsd:double`. */
     public static function double(float $value): self
     {
-        return new self((string) $value, ProvNamespace::xsd()->qualifiedName('double'));
+        return new self(self::formatFloat($value), ProvNamespace::xsd()->qualifiedName('double'));
     }
 
     /** Literal typed as `xsd:long`. */
@@ -89,6 +89,36 @@ readonly class Literal implements \Stringable
     public static function anyURI(string $value): self
     {
         return new self($value, ProvNamespace::xsd()->qualifiedName('anyURI'));
+    }
+
+    /**
+     * Formats a float as a round-trippable, locale-independent lexical string.
+     *
+     * Uses the shortest representation that parses back to the same value
+     * (driven by serialize_precision), unlike a plain `(string)` cast which is
+     * bound by the `precision` ini setting and can drop significant digits.
+     */
+    public static function formatFloat(float $value): string
+    {
+        if (is_nan($value)) {
+            return 'NaN';
+        }
+        if (is_infinite($value)) {
+            return $value > 0 ? 'INF' : '-INF';
+        }
+        $encoded = json_encode($value, JSON_PRESERVE_ZERO_FRACTION);
+        return $encoded === false ? (string) $value : $encoded;
+    }
+
+    /**
+     * Formats a datetime as an xsd:dateTime lexical string, including sub-second
+     * precision only when the value actually carries microseconds (so whole-second
+     * timestamps keep their canonical ISO 8601 / ATOM form).
+     */
+    public static function formatDateTime(\DateTimeImmutable $value): string
+    {
+        $pattern = $value->format('u') === '000000' ? \DateTimeInterface::ATOM : 'Y-m-d\TH:i:s.uP';
+        return $value->format($pattern);
     }
 
     public function __toString(): string

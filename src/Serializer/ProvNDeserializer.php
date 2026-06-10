@@ -774,10 +774,16 @@ class ProvNDeserializer implements ProvDeserializerInterface
             if (!is_numeric($val)) {
                 throw $this->err("Expected numeric literal, got '{$val}'.");
             }
-            if (str_contains($val, '.')) {
+            if (str_contains($val, '.') || str_contains($val, 'e') || str_contains($val, 'E')) {
                 return (float) $val;
             }
-            return (int) $val;
+            $asInt = (int) $val;
+            // PHP's (int) cast silently clamps values outside its integer range; when
+            // the magnitude would be lost, preserve the exact value as xsd:integer.
+            if ((float) $asInt !== (float) $val) {
+                return new Literal($val, ProvNamespace::xsd()->qualifiedName('integer'));
+            }
+            return $asInt;
         }
 
         // true/false

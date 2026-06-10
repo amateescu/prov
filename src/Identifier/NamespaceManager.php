@@ -96,6 +96,16 @@ class NamespaceManager
             return $this->resolveCache[$shorthand];
         }
 
+        // Blank-node sentinel (e.g. "_:b1"): an anonymous record identifier, not a
+        // prefixed name to resolve against a namespace. Mirrors RecordBuilder::blank()
+        // so a blank node round-trips back to the same QualifiedName it serialized from.
+        if (str_starts_with($shorthand, '_:')) {
+            return $this->resolveCache[$shorthand] = new QualifiedName(
+                new ProvNamespace('_', '_:'),
+                substr($shorthand, 2),
+            );
+        }
+
         // Try the full-URI path only if the input actually looks like one.
         // Prefixed shorthands like "ex:e1" contain ':' but would waste a linear
         // scan of all namespaces in resolveUri().

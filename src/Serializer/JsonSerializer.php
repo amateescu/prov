@@ -249,10 +249,10 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         $attrs = $record->attributes->isEmpty() ? [] : $this->serializeAttributes($record->attributes, $nsManager);
 
         if ($record->startTime !== null) {
-            $attrs['prov:startTime'] = $record->startTime->format(\DateTimeInterface::ATOM);
+            $attrs['prov:startTime'] = Literal::formatDateTime($record->startTime);
         }
         if ($record->endTime !== null) {
-            $attrs['prov:endTime'] = $record->endTime->format(\DateTimeInterface::ATOM);
+            $attrs['prov:endTime'] = Literal::formatDateTime($record->endTime);
         }
 
         $this->appendToSection($output, 'activity', $id, $attrs ?: new \stdClass());
@@ -320,7 +320,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             if ($type === 'ref') {
                 $attrs[$key] = (string) $value;
             } elseif ($type === 'time') {
-                $attrs[$key] = $value->format(\DateTimeInterface::ATOM);
+                $attrs[$key] = Literal::formatDateTime($value);
             } elseif ($prop === 'keyEntityPairs') {
                 $this->addDictKeyEntitySet($attrs, $value ?? []);
             } elseif ($prop === 'removedKeys') {
@@ -513,8 +513,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $emptyAttrs = Attributes::empty();
             foreach ($json['entity'] as $id => $attrs) {
                 $idStr = (string) $id;
-                $deserId =
-                    $idStr[0] === '_' && isset($idStr[1]) && $idStr[1] === ':' ? null : $nsManager->resolve($idStr);
+                $deserId = $nsManager->resolve($idStr);
                 // Fast path: the overwhelmingly common "no attributes" case.
                 if ($attrs === [] || $attrs === null) {
                     $records[] = new Entity($deserId, $emptyAttrs);
@@ -536,8 +535,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $emptyAttrs = Attributes::empty();
             foreach ($json['activity'] as $id => $attrs) {
                 $idStr = (string) $id;
-                $deserId =
-                    $idStr[0] === '_' && isset($idStr[1]) && $idStr[1] === ':' ? null : $nsManager->resolve($idStr);
+                $deserId = $nsManager->resolve($idStr);
                 if ($attrs === [] || $attrs === null) {
                     $records[] = new Activity($deserId, null, null, $emptyAttrs);
                     continue;
@@ -567,8 +565,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $emptyAttrs = Attributes::empty();
             foreach ($json['agent'] as $id => $attrs) {
                 $idStr = (string) $id;
-                $deserId =
-                    $idStr[0] === '_' && isset($idStr[1]) && $idStr[1] === ':' ? null : $nsManager->resolve($idStr);
+                $deserId = $nsManager->resolve($idStr);
                 if ($attrs === [] || $attrs === null) {
                     $records[] = new Agent($deserId, $emptyAttrs);
                     continue;
@@ -665,8 +662,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         NamespaceManager $nsManager,
         array &$records,
     ): void {
-        // Blank-node identifiers (_:xxx) become null; others resolve to a QualifiedName.
-        $deserId = $id[0] === '_' && isset($id[1]) && $id[1] === ':' ? null : $nsManager->resolve($id);
+        $deserId = $nsManager->resolve($id);
 
         // hadMember prov:entity can be an array of entity references.
         if (

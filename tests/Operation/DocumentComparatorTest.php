@@ -199,4 +199,47 @@ final class DocumentComparatorTest extends TestCase
 
         $this->assertTrue(DocumentComparator::equals($docFromJson, $docFromXml));
     }
+
+    public function testCraftedAttributeValueDoesNotForgeEquality(): void
+    {
+        // A string value embedding the signature delimiters must not let a single-attribute
+        // record match a genuinely different two-attribute record.
+        $a = $this->buildDoc();
+        $a->entity('ex:e', ['ex:a' => 'p^^http://www.w3.org/2001/XMLSchema#string;http://example.org/b=lit:q']);
+        $b = $this->buildDoc();
+        $b->entity('ex:e', ['ex:a' => 'p', 'ex:b' => 'q']);
+
+        $this->assertFalse(DocumentComparator::equals($a->build(), $b->build()));
+    }
+
+    public function testLanguageTagIsSignificant(): void
+    {
+        $a = $this->buildDoc();
+        $a->entity('ex:e', ['ex:a' => new Literal('hello', null, 'en')]);
+        $b = $this->buildDoc();
+        $b->entity('ex:e', ['ex:a' => new Literal('hello', null, 'fr')]);
+
+        $this->assertFalse(DocumentComparator::equals($a->build(), $b->build()));
+    }
+
+    public function testDatatypeIsSignificant(): void
+    {
+        $a = $this->buildDoc();
+        $a->entity('ex:e', ['ex:a' => new Literal('1', $this->ex->qualifiedName('custom'))]);
+        $b = $this->buildDoc();
+        $b->entity('ex:e', ['ex:a' => new Literal('1', $this->ex->qualifiedName('other'))]);
+
+        $this->assertFalse(DocumentComparator::equals($a->build(), $b->build()));
+    }
+
+    public function testNativeScalarEqualsCanonicalLiteral(): void
+    {
+        // A native int signs identically to the xsd:int Literal a round-trip produces.
+        $a = $this->buildDoc();
+        $a->entity('ex:e', ['ex:n' => 42]);
+        $b = $this->buildDoc();
+        $b->entity('ex:e', ['ex:n' => Literal::int(42)]);
+
+        $this->assertTrue(DocumentComparator::equals($a->build(), $b->build()));
+    }
 }

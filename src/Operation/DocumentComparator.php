@@ -117,32 +117,36 @@ final class DocumentComparator
 
     private static function recordSignature(ProvRecord $record): string
     {
-        $parts = [$record::class];
-
-        // Identifier (blank nodes normalize to empty).
+        // Blank node identifiers (null, or the "_:" sentinel) normalize to empty, so a
+        // blank record signs the same regardless of how its anonymity is represented.
         $id = $record->identifier;
-        $parts[] = $id !== null ? $id->getUri() : '';
+        $idSig = $id === null || str_starts_with($id->getUri(), '_:') ? '' : $id->getUri();
 
-        // Formal attributes (type-specific properties).
-        $parts[] = self::formalSignature($record);
-
-        // Extra attributes.
-        $parts[] = self::attributesSignature($record->attributes);
-
-        return implode('|', $parts);
+        // json_encode gives an unambiguous, injection-proof signature in one pass: a crafted
+        // attribute value cannot forge a component boundary because every string is JSON-escaped.
+        // JSON_INVALID_UTF8_SUBSTITUTE keeps non-UTF-8 byte sequences from failing the encode.
+        return (string) json_encode([
+            $record::class,
+            $idSig,
+            self::formalSignature($record),
+            self::attributesSignature($record->attributes),
+        ], JSON_INVALID_UTF8_SUBSTITUTE);
     }
 
-    private static function formalSignature(ProvRecord $record): string
+    /**
+     * @return list<string|list<mixed>>
+     */
+    private static function formalSignature(ProvRecord $record): array
     {
         if ($record instanceof Activity) {
-            return implode(',', [
-                $record->startTime?->format(\DateTimeInterface::ATOM) ?? '',
-                $record->endTime?->format(\DateTimeInterface::ATOM) ?? '',
-            ]);
+            return [
+                $record->startTime !== null ? Literal::formatDateTime($record->startTime) : '',
+                $record->endTime !== null ? Literal::formatDateTime($record->endTime) : '',
+            ];
         }
 
         if (!$record instanceof ProvRelation) {
-            return '';
+            return [];
         }
 
         /** @var array<string, \Prov\Identifier\QualifiedName|\DateTimeImmutable|list<mixed>|null> $formals */
@@ -156,7 +160,7 @@ final class DocumentComparator
                 $formals['alternate2'] instanceof QualifiedName ? $formals['alternate2']->getUri() : '',
             ];
             sort($uris);
-            return implode(',', $uris);
+            return $uris;
         }
 
         $parts = [];
@@ -164,7 +168,7 @@ final class DocumentComparator
             if ($value instanceof QualifiedName) {
                 $parts[] = $value->getUri();
             } elseif ($value instanceof \DateTimeImmutable) {
-                $parts[] = $value->format(\DateTimeInterface::ATOM);
+                $parts[] = Literal::formatDateTime($value);
             } elseif (is_array($value) && $prop === 'keyEntityPairs') {
                 /** @var list<\Prov\Relation\Dictionary\DictionaryEntry> $value */
                 $parts[] = self::keyEntityPairsSignature($value);
@@ -175,24 +179,23 @@ final class DocumentComparator
             }
         }
 
-        return implode(',', $parts);
+        return $parts;
     }
 
-    private static function attributesSignature(Attributes $attrs): string
+    /**
+     * @return list<array{string, string}>
+     */
+    private static function attributesSignature(Attributes $attrs): array
     {
-        if ($attrs->isEmpty()) {
-            return '';
-        }
-
         $pairs = [];
         foreach ($attrs->all() as $uri => $values) {
             foreach ($values as $value) {
-                $pairs[] = $uri . '=' . self::valueSignature($value);
+                $pairs[] = [$uri, self::valueSignature($value)];
             }
         }
 
         sort($pairs);
-        return implode(';', $pairs);
+        return $pairs;
     }
 
     private static function valueSignature(QualifiedName|Literal|string|int|float|bool $value): string
@@ -223,7 +226,16 @@ final class DocumentComparator
         if (is_string($value)) {
             return 'lit:' . $value . '^^' . self::XSD_STRING_URI;
         }
-        return gettype($value) . ':' . var_export($value, true);
+        // Native scalars sign identically to the canonical xsd:* Literal a round-trip
+        // through PROV-N/XML produces, so a value stays equal across formats. The token is
+        // built inline to avoid allocating a Literal and QualifiedName on this hot path.
+        if (is_bool($value)) {
+            return 'lit:' . ($value ? 'true' : 'false') . '^^http://www.w3.org/2001/XMLSchema#boolean';
+        }
+        if (is_int($value)) {
+            return 'lit:' . $value . '^^http://www.w3.org/2001/XMLSchema#int';
+        }
+        return 'lit:' . Literal::formatFloat($value) . '^^http://www.w3.org/2001/XMLSchema#float';
     }
 
     /**
@@ -273,27 +285,29 @@ final class DocumentComparator
 
     /**
      * @param list<\Prov\Relation\Dictionary\DictionaryEntry> $pairs
+     *
+     * @return list<array{string, string}>
      */
-    private static function keyEntityPairsSignature(array $pairs): string
+    private static function keyEntityPairsSignature(array $pairs): array
     {
         $sigs = [];
         foreach ($pairs as $pair) {
-            $key = self::keySignature($pair->key);
-            $entity = $pair->entity?->getUri() ?? '';
-            $sigs[] = "{$key}={$entity}";
+            $sigs[] = [self::keySignature($pair->key), $pair->entity?->getUri() ?? ''];
         }
         sort($sigs);
-        return implode(',', $sigs);
+        return $sigs;
     }
 
     /**
      * @param list<mixed> $keys
+     *
+     * @return list<string>
      */
-    private static function removedKeysSignature(array $keys): string
+    private static function removedKeysSignature(array $keys): array
     {
         $sigs = array_map(self::keySignature(...), $keys);
         sort($sigs);
-        return implode(',', $sigs);
+        return $sigs;
     }
 
     private static function keySignature(mixed $key): string

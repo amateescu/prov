@@ -193,14 +193,14 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             $el->appendChild($dom->createElementNS(
                 self::PROV_NS,
                 'prov:startTime',
-                $record->startTime->format(\DateTimeInterface::ATOM),
+                Literal::formatDateTime($record->startTime),
             ));
         }
         if ($record->endTime !== null) {
             $el->appendChild($dom->createElementNS(
                 self::PROV_NS,
                 'prov:endTime',
-                $record->endTime->format(\DateTimeInterface::ATOM),
+                Literal::formatDateTime($record->endTime),
             ));
         }
         $this->serializeAttributes($dom, $el, $record->attributes, $nsManager);
@@ -315,7 +315,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                 $el->appendChild($dom->createElementNS(
                     self::PROV_NS,
                     'prov:' . $childName,
-                    $value->format(\DateTimeInterface::ATOM),
+                    Literal::formatDateTime($value),
                 ));
             }
         }
@@ -420,7 +420,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             $el->textContent = (string) $value;
         } elseif (is_float($value)) {
             $el->setAttributeNS(self::XSI_NS, 'xsi:type', 'xsd:float');
-            $el->textContent = (string) $value;
+            $el->textContent = Literal::formatFloat($value);
         } else {
             $el->textContent = (string) $value;
         }
