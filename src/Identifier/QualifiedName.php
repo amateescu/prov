@@ -51,6 +51,16 @@ readonly class QualifiedName implements \Stringable
         return $this->uri;
     }
 
+    /**
+     * Whether this identifier is a blank node: an anonymous record label in
+     * the reserved `_:` pseudo-namespace rather than a resolvable URI. Blank
+     * labels are document-scoped; only their links matter, not their names.
+     */
+    public function isBlank(): bool
+    {
+        return str_starts_with($this->uri, '_:');
+    }
+
     public function __toString(): string
     {
         return $this->stringForm;

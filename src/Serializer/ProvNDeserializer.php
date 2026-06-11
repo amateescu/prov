@@ -16,6 +16,7 @@ use Prov\Exception\NamespaceException;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
+use Prov\Model\RelationMetadata;
 use Prov\Relation\Alternate;
 use Prov\Relation\Association;
 use Prov\Relation\Attribution;
@@ -321,17 +322,6 @@ class ProvNDeserializer implements ProvDeserializerInterface
     // --- Relations ---
 
     /**
-     * PROV-N shortcut keywords that desugar to a Derivation with a prov:type attribute.
-     *
-     * @var array<string, string>
-     */
-    private const array DERIVATION_SUBTYPES = [
-        'wasRevisionOf' => 'Revision',
-        'wasQuotedFrom' => 'Quotation',
-        'hadPrimarySource' => 'PrimarySource',
-    ];
-
-    /**
      * @param list<\Prov\Model\ProvRecord> $records
      */
     private function parseRelation(NamespaceManager $nsManager, array &$records, string $kw): void
@@ -342,9 +332,9 @@ class ProvNDeserializer implements ProvDeserializerInterface
 
         $this->expect(')');
 
-        if (isset(self::DERIVATION_SUBTYPES[$kw])) {
+        if (isset(RelationMetadata::DERIVATION_SUBTYPES[$kw])) {
             [$id, $args, $attrs] = $parsed;
-            $typeValue = $nsManager->resolve('prov:' . self::DERIVATION_SUBTYPES[$kw]);
+            $typeValue = $nsManager->resolve('prov:' . RelationMetadata::DERIVATION_SUBTYPES[$kw]);
             $attrs = ($attrs ?? Attributes::empty())->with($nsManager->resolve('prov:type'), $typeValue);
             $parsed = [$id, $args, $attrs];
             $kw = 'wasDerivedFrom';

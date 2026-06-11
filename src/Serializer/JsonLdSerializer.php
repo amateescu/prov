@@ -14,21 +14,8 @@ use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\ProvElement;
 use Prov\Model\ProvRelation;
-use Prov\Relation\Alternate;
-use Prov\Relation\Association;
-use Prov\Relation\Attribution;
-use Prov\Relation\Communication;
-use Prov\Relation\Delegation;
-use Prov\Relation\Derivation;
-use Prov\Relation\End;
-use Prov\Relation\Generation;
-use Prov\Relation\Influence;
-use Prov\Relation\Invalidation;
-use Prov\Relation\Membership;
+use Prov\Model\RelationMetadata;
 use Prov\Relation\Mention;
-use Prov\Relation\Specialization;
-use Prov\Relation\Start;
-use Prov\Relation\Usage;
 
 /**
  * Writes a Document as PROV-JSONLD (the JSON-LD encoding of PROV-O). This
@@ -187,377 +174,73 @@ class JsonLdSerializer implements ProvSerializerInterface
     }
 
     /**
+     * Attaches a relation to its subject node: in qualified form (a nested
+     * node typed per PROV-O) when the relation carries an identifier, extra
+     * attributes, or secondary formals, and as a plain object property
+     * otherwise. The encoding is table-driven by RelationMetadata::JSONLD.
+     * Mention keeps a hand-written shape (its object nests prov:asInBundle),
+     * and the Dictionary extension relations have no PROV-O shortcut form.
+     *
      * @param array<string, array<string, mixed>> $nodes
      */
     private function attachRelation(ProvRelation $relation, array &$nodes, NamespaceManager $nsManager): void
     {
-        match (true) {
-            $relation instanceof Generation => $this->attachGeneration($relation, $nodes, $nsManager),
-            $relation instanceof Usage => $this->attachUsage($relation, $nodes, $nsManager),
-            $relation instanceof Communication => $this->attachCommunication($relation, $nodes, $nsManager),
-            $relation instanceof Start => $this->attachStart($relation, $nodes, $nsManager),
-            $relation instanceof End => $this->attachEnd($relation, $nodes, $nsManager),
-            $relation instanceof Invalidation => $this->attachInvalidation($relation, $nodes, $nsManager),
-            $relation instanceof Derivation => $this->attachDerivation($relation, $nodes, $nsManager),
-            $relation instanceof Attribution => $this->attachAttribution($relation, $nodes, $nsManager),
-            $relation instanceof Association => $this->attachAssociation($relation, $nodes, $nsManager),
-            $relation instanceof Delegation => $this->attachDelegation($relation, $nodes, $nsManager),
-            $relation instanceof Influence => $this->attachInfluence($relation, $nodes, $nsManager),
-            $relation instanceof Specialization => $this->attachSpecialization($relation, $nodes),
-            $relation instanceof Alternate => $this->attachAlternate($relation, $nodes),
-            $relation instanceof Membership => $this->attachMembership($relation, $nodes),
-            $relation instanceof Mention => $this->attachMention($relation, $nodes),
-            default => null,
-        };
-    }
-
-    // @mago-expect lint:no-boolean-flag-parameter
-    private function needsQualification(ProvRelation $relation, bool $hasExtraFormals = false): bool
-    {
-        return $relation->identifier !== null || !$relation->attributes->isEmpty() || $hasExtraFormals;
-    }
-
-    /**
-     * Generation: subject=entity, object=activity.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachGeneration(Generation $gen, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $gen->entity !== null ? (string) $gen->entity : null;
-        if ($subjectId === null) {
+        if ($relation instanceof Mention) {
+            $this->attachMention($relation, $nodes);
             return;
         }
-        $this->ensureNode($nodes, $subjectId);
 
-        $hasExtraFormals = $gen->time !== null;
-        if ($this->needsQualification($gen, $hasExtraFormals)) {
-            $qNode = $this->makeQualifiedNode('prov:Generation', $gen, $nsManager);
-            if ($gen->activity !== null) {
-                $qNode['prov:activity'] = $this->idRef($gen->activity);
-            }
-            if ($gen->time !== null) {
-                $qNode['prov:atTime'] = $this->formatDateTime($gen->time);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedGeneration', $qNode);
-        } elseif ($gen->activity !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:wasGeneratedBy', $this->idRef($gen->activity));
-        }
-    }
-
-    /**
-     * Usage: subject=activity, object=entity.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachUsage(Usage $usage, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $usage->activity !== null ? (string) $usage->activity : null;
-        if ($subjectId === null) {
+        $spec = RelationMetadata::JSONLD[$relation::class] ?? null;
+        if ($spec === null) {
             return;
         }
-        $this->ensureNode($nodes, $subjectId);
 
-        $hasExtraFormals = $usage->time !== null;
-        if ($this->needsQualification($usage, $hasExtraFormals)) {
-            $qNode = $this->makeQualifiedNode('prov:Usage', $usage, $nsManager);
-            if ($usage->entity !== null) {
-                $qNode['prov:entity'] = $this->idRef($usage->entity);
-            }
-            if ($usage->time !== null) {
-                $qNode['prov:atTime'] = $this->formatDateTime($usage->time);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedUsage', $qNode);
-        } elseif ($usage->entity !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:used', $this->idRef($usage->entity));
-        }
-    }
-
-    /**
-     * Communication: subject=informed, object=informant.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachCommunication(Communication $comm, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $comm->informed !== null ? (string) $comm->informed : null;
-        if ($subjectId === null) {
+        $formals = RelationMetadata::extractFormals($relation);
+        $subjectProp = array_key_first($formals);
+        // @mago-expect analysis:mixed-assignment
+        $subject = $subjectProp !== null ? $formals[$subjectProp] : null;
+        if (!$subject instanceof QualifiedName) {
             return;
         }
+        $subjectId = (string) $subject;
         $this->ensureNode($nodes, $subjectId);
 
-        if ($this->needsQualification($comm)) {
-            $qNode = $this->makeQualifiedNode('prov:Communication', $comm, $nsManager);
-            if ($comm->informant !== null) {
-                $qNode['prov:activity'] = $this->idRef($comm->informant);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedCommunication', $qNode);
-        } elseif ($comm->informant !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:wasInformedBy', $this->idRef($comm->informant));
-        }
-    }
+        $properties = $spec['properties'];
+        $objectProp = array_key_first($properties);
+        // @mago-expect analysis:mixed-assignment
+        $object = $objectProp !== null ? $formals[$objectProp] ?? null : null;
 
-    /**
-     * Start: subject=activity, trigger=entity, starter=activity.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachStart(Start $start, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $start->activity !== null ? (string) $start->activity : null;
-        if ($subjectId === null) {
+        if ($spec['qualifiedProperty'] === null) {
+            // Plain object property (specializationOf, alternateOf, hadMember).
+            if ($object instanceof QualifiedName) {
+                $this->appendProperty($nodes[$subjectId], $spec['shortcutProperty'], $this->idRef($object));
+            }
             return;
         }
-        $this->ensureNode($nodes, $subjectId);
 
-        $hasExtraFormals = $start->time !== null || $start->starter !== null;
-        if ($this->needsQualification($start, $hasExtraFormals)) {
-            $qNode = $this->makeQualifiedNode('prov:Start', $start, $nsManager);
-            if ($start->trigger !== null) {
-                $qNode['prov:entity'] = $this->idRef($start->trigger);
+        $hasExtraFormals = false;
+        foreach ($properties as $prop => $unused) {
+            if ($prop !== $objectProp && ($formals[$prop] ?? null) !== null) {
+                $hasExtraFormals = true;
+                break;
             }
-            if ($start->starter !== null) {
-                $qNode['prov:hadActivity'] = $this->idRef($start->starter);
+        }
+
+        if ($relation->identifier !== null || !$relation->attributes->isEmpty() || $hasExtraFormals) {
+            $qNode = $this->makeQualifiedNode((string) $spec['type'], $relation, $nsManager);
+            foreach ($properties as $prop => $jsonLdProperty) {
+                // @mago-expect analysis:mixed-assignment
+                $value = $formals[$prop] ?? null;
+                if ($value instanceof QualifiedName) {
+                    $qNode[$jsonLdProperty] = $this->idRef($value);
+                } elseif ($value instanceof \DateTimeImmutable) {
+                    $qNode[$jsonLdProperty] = $this->formatDateTime($value);
+                }
             }
-            if ($start->time !== null) {
-                $qNode['prov:atTime'] = $this->formatDateTime($start->time);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedStart', $qNode);
-        } elseif ($start->trigger !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:wasStartedBy', $this->idRef($start->trigger));
+            $this->appendProperty($nodes[$subjectId], $spec['qualifiedProperty'], $qNode);
+        } elseif ($object instanceof QualifiedName) {
+            $this->appendProperty($nodes[$subjectId], $spec['shortcutProperty'], $this->idRef($object));
         }
-    }
-
-    /**
-     * End: subject=activity, trigger=entity, ender=activity.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachEnd(End $end, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $end->activity !== null ? (string) $end->activity : null;
-        if ($subjectId === null) {
-            return;
-        }
-        $this->ensureNode($nodes, $subjectId);
-
-        $hasExtraFormals = $end->time !== null || $end->ender !== null;
-        if ($this->needsQualification($end, $hasExtraFormals)) {
-            $qNode = $this->makeQualifiedNode('prov:End', $end, $nsManager);
-            if ($end->trigger !== null) {
-                $qNode['prov:entity'] = $this->idRef($end->trigger);
-            }
-            if ($end->ender !== null) {
-                $qNode['prov:hadActivity'] = $this->idRef($end->ender);
-            }
-            if ($end->time !== null) {
-                $qNode['prov:atTime'] = $this->formatDateTime($end->time);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedEnd', $qNode);
-        } elseif ($end->trigger !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:wasEndedBy', $this->idRef($end->trigger));
-        }
-    }
-
-    /**
-     * Invalidation: subject=entity, object=activity.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachInvalidation(Invalidation $inv, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $inv->entity !== null ? (string) $inv->entity : null;
-        if ($subjectId === null) {
-            return;
-        }
-        $this->ensureNode($nodes, $subjectId);
-
-        $hasExtraFormals = $inv->time !== null;
-        if ($this->needsQualification($inv, $hasExtraFormals)) {
-            $qNode = $this->makeQualifiedNode('prov:Invalidation', $inv, $nsManager);
-            if ($inv->activity !== null) {
-                $qNode['prov:activity'] = $this->idRef($inv->activity);
-            }
-            if ($inv->time !== null) {
-                $qNode['prov:atTime'] = $this->formatDateTime($inv->time);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedInvalidation', $qNode);
-        } elseif ($inv->activity !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:wasInvalidatedBy', $this->idRef($inv->activity));
-        }
-    }
-
-    /**
-     * Derivation: subject=generatedEntity, object=usedEntity.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachDerivation(Derivation $der, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $der->generatedEntity !== null ? (string) $der->generatedEntity : null;
-        if ($subjectId === null) {
-            return;
-        }
-        $this->ensureNode($nodes, $subjectId);
-
-        $hasExtraFormals = $der->activity !== null || $der->generation !== null || $der->usage !== null;
-        if ($this->needsQualification($der, $hasExtraFormals)) {
-            $qNode = $this->makeQualifiedNode('prov:Derivation', $der, $nsManager);
-            if ($der->usedEntity !== null) {
-                $qNode['prov:entity'] = $this->idRef($der->usedEntity);
-            }
-            if ($der->activity !== null) {
-                $qNode['prov:hadActivity'] = $this->idRef($der->activity);
-            }
-            if ($der->generation !== null) {
-                $qNode['prov:hadGeneration'] = $this->idRef($der->generation);
-            }
-            if ($der->usage !== null) {
-                $qNode['prov:hadUsage'] = $this->idRef($der->usage);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedDerivation', $qNode);
-        } elseif ($der->usedEntity !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:wasDerivedFrom', $this->idRef($der->usedEntity));
-        }
-    }
-
-    /**
-     * Attribution: subject=entity, object=agent.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachAttribution(Attribution $attr, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $attr->entity !== null ? (string) $attr->entity : null;
-        if ($subjectId === null) {
-            return;
-        }
-        $this->ensureNode($nodes, $subjectId);
-
-        if ($this->needsQualification($attr)) {
-            $qNode = $this->makeQualifiedNode('prov:Attribution', $attr, $nsManager);
-            if ($attr->agent !== null) {
-                $qNode['prov:agent'] = $this->idRef($attr->agent);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedAttribution', $qNode);
-        } elseif ($attr->agent !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:wasAttributedTo', $this->idRef($attr->agent));
-        }
-    }
-
-    /**
-     * Association: subject=activity, object=agent.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachAssociation(Association $assoc, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $assoc->activity !== null ? (string) $assoc->activity : null;
-        if ($subjectId === null) {
-            return;
-        }
-        $this->ensureNode($nodes, $subjectId);
-
-        $hasExtraFormals = $assoc->plan !== null;
-        if ($this->needsQualification($assoc, $hasExtraFormals)) {
-            $qNode = $this->makeQualifiedNode('prov:Association', $assoc, $nsManager);
-            if ($assoc->agent !== null) {
-                $qNode['prov:agent'] = $this->idRef($assoc->agent);
-            }
-            if ($assoc->plan !== null) {
-                $qNode['prov:hadPlan'] = $this->idRef($assoc->plan);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedAssociation', $qNode);
-        } elseif ($assoc->agent !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:wasAssociatedWith', $this->idRef($assoc->agent));
-        }
-    }
-
-    /**
-     * Delegation: subject=delegate, object=responsible.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachDelegation(Delegation $del, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $del->delegate !== null ? (string) $del->delegate : null;
-        if ($subjectId === null) {
-            return;
-        }
-        $this->ensureNode($nodes, $subjectId);
-
-        $hasExtraFormals = $del->activity !== null;
-        if ($this->needsQualification($del, $hasExtraFormals)) {
-            $qNode = $this->makeQualifiedNode('prov:Delegation', $del, $nsManager);
-            if ($del->responsible !== null) {
-                $qNode['prov:agent'] = $this->idRef($del->responsible);
-            }
-            if ($del->activity !== null) {
-                $qNode['prov:hadActivity'] = $this->idRef($del->activity);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedDelegation', $qNode);
-        } elseif ($del->responsible !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:actedOnBehalfOf', $this->idRef($del->responsible));
-        }
-    }
-
-    /**
-     * Influence: subject=influencee, object=influencer.
-     *
-     * @param array<string, array<string, mixed>> $nodes
-     */
-    private function attachInfluence(Influence $inf, array &$nodes, NamespaceManager $nsManager): void
-    {
-        $subjectId = $inf->influencee !== null ? (string) $inf->influencee : null;
-        if ($subjectId === null) {
-            return;
-        }
-        $this->ensureNode($nodes, $subjectId);
-
-        if ($this->needsQualification($inf)) {
-            $qNode = $this->makeQualifiedNode('prov:Influence', $inf, $nsManager);
-            if ($inf->influencer !== null) {
-                $qNode['prov:influencer'] = $this->idRef($inf->influencer);
-            }
-            $this->appendProperty($nodes[$subjectId], 'prov:qualifiedInfluence', $qNode);
-        } elseif ($inf->influencer !== null) {
-            $this->appendProperty($nodes[$subjectId], 'prov:wasInfluencedBy', $this->idRef($inf->influencer));
-        }
-    }
-
-    // Non-qualifiable binary relations
-
-    /** @param array<string, array<string, mixed>> $nodes */
-    private function attachSpecialization(Specialization $spec, array &$nodes): void
-    {
-        $subjectId = $spec->specificEntity !== null ? (string) $spec->specificEntity : null;
-        if ($subjectId === null || $spec->generalEntity === null) {
-            return;
-        }
-        $this->ensureNode($nodes, $subjectId);
-        $this->appendProperty($nodes[$subjectId], 'prov:specializationOf', $this->idRef($spec->generalEntity));
-    }
-
-    /** @param array<string, array<string, mixed>> $nodes */
-    private function attachAlternate(Alternate $alt, array &$nodes): void
-    {
-        $subjectId = $alt->alternate1 !== null ? (string) $alt->alternate1 : null;
-        if ($subjectId === null || $alt->alternate2 === null) {
-            return;
-        }
-        $this->ensureNode($nodes, $subjectId);
-        $this->appendProperty($nodes[$subjectId], 'prov:alternateOf', $this->idRef($alt->alternate2));
-    }
-
-    /** @param array<string, array<string, mixed>> $nodes */
-    private function attachMembership(Membership $mem, array &$nodes): void
-    {
-        $subjectId = $mem->collection !== null ? (string) $mem->collection : null;
-        if ($subjectId === null || $mem->entity === null) {
-            return;
-        }
-        $this->ensureNode($nodes, $subjectId);
-        $this->appendProperty($nodes[$subjectId], 'prov:hadMember', $this->idRef($mem->entity));
     }
 
     /** @param array<string, array<string, mixed>> $nodes */
