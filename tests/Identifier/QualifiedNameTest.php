@@ -48,10 +48,10 @@ final class QualifiedNameTest extends TestCase
         $this->assertInstanceOf(\Stringable::class, $qn);
     }
 
-    public function testEmptyLocalPart(): void
+    public function testEmptyLocalPartIsRejected(): void
     {
-        $qn = new QualifiedName($this->ex, '');
-        $this->assertSame('http://example.org/', $qn->uri);
-        $this->assertSame('ex:', (string) $qn);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('local part cannot be empty');
+        new QualifiedName($this->ex, '');
     }
 }

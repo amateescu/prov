@@ -8,16 +8,20 @@ use Prov\Activity;
 use Prov\Agent;
 use Prov\Attribute\Attributes;
 use Prov\Attribute\AttributesBuilder;
+use Prov\Attribute\Literal;
 use Prov\Entity;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
+use Prov\Model\ProvRelation;
+use Prov\Model\RelationMetadata;
 use Prov\Relation\Alternate;
 use Prov\Relation\Association;
 use Prov\Relation\Attribution;
 use Prov\Relation\Communication;
 use Prov\Relation\Delegation;
 use Prov\Relation\Derivation;
+use Prov\Relation\Dictionary\DictionaryEntry;
 use Prov\Relation\Dictionary\DictionaryInsertion;
 use Prov\Relation\Dictionary\DictionaryMembership;
 use Prov\Relation\Dictionary\DictionaryRemoval;
@@ -76,6 +80,8 @@ abstract class RecordBuilder
 
     protected bool $built = false;
 
+    protected bool $keepUnusedNamespaces = false;
+
     private int $blankNodeCounter = 0;
 
     /**
@@ -106,6 +112,32 @@ abstract class RecordBuilder
     public function addNamespace(ProvNamespace $ns): static
     {
         $this->namespaceManager->add($ns);
+        return $this;
+    }
+
+    /**
+     * Registers several namespaces at once. Convenient for builders fed from
+     * an application-wide namespace registry.
+     *
+     * @param iterable<\Prov\Identifier\ProvNamespace> $namespaces
+     */
+    public function addNamespaces(iterable $namespaces): static
+    {
+        foreach ($namespaces as $ns) {
+            $this->namespaceManager->add($ns);
+        }
+        return $this;
+    }
+
+    /**
+     * Keeps every registered namespace in the built container, including ones
+     * no record references. By default `build()` prunes the declarations down
+     * to the namespaces actually used by records, attributes, and bundle
+     * contents. Call this before creating bundles so they inherit the choice.
+     */
+    public function keepUnusedNamespaces(): static
+    {
+        $this->keepUnusedNamespaces = true;
         return $this;
     }
 
@@ -620,6 +652,94 @@ abstract class RecordBuilder
     }
 
     // --- Internal helpers ---
+
+    /**
+     * Filters namespaces down to those covering at least one referenced URI.
+     *
+     * @param list<\Prov\Identifier\ProvNamespace> $namespaces
+     * @param array<string, true> $usedUris
+     *
+     * @return list<\Prov\Identifier\ProvNamespace>
+     */
+    protected static function pruneNamespaces(array $namespaces, array $usedUris): array
+    {
+        $kept = [];
+        foreach ($namespaces as $ns) {
+            foreach ($usedUris as $uri => $unused) {
+                if (str_starts_with($uri, $ns->uri)) {
+                    $kept[] = $ns;
+                    break;
+                }
+            }
+        }
+        return $kept;
+    }
+
+    /**
+     * Collects the full URI of every QualifiedName the records reference:
+     * identifiers, relation endpoints, attribute keys and values, literal
+     * datatypes, and dictionary entries.
+     *
+     * @param list<\Prov\Model\ProvRecord> $records
+     * @param array<string, true> $uris
+     *
+     * @return array<string, true>
+     */
+    protected static function collectReferencedUris(array $records, array $uris = []): array
+    {
+        foreach ($records as $record) {
+            if ($record->identifier !== null) {
+                $uris[$record->identifier->getUri()] = true;
+            }
+            foreach ($record->attributes->all() as $keyUri => $values) {
+                $uris[$keyUri] = true;
+                foreach ($values as $value) {
+                    if ($value instanceof QualifiedName) {
+                        $uris[$value->getUri()] = true;
+                    } elseif ($value instanceof Literal && $value->datatype !== null) {
+                        $uris[$value->datatype->getUri()] = true;
+                    }
+                }
+            }
+            if ($record instanceof ProvRelation) {
+                // @mago-expect analysis:mixed-assignment
+                foreach (RelationMetadata::extractFormals($record) as $value) {
+                    if ($value instanceof QualifiedName) {
+                        $uris[$value->getUri()] = true;
+                    } elseif (is_array($value)) {
+                        $uris = self::collectDictionaryUris($value, $uris);
+                    }
+                }
+            }
+        }
+        return $uris;
+    }
+
+    /**
+     * @param array<array-key, mixed> $items
+     *   Dictionary key-entity pairs or removed keys.
+     * @param array<string, true> $uris
+     *
+     * @return array<string, true>
+     */
+    private static function collectDictionaryUris(array $items, array $uris): array
+    {
+        // @mago-expect analysis:mixed-assignment
+        foreach ($items as $item) {
+            if ($item instanceof DictionaryEntry) {
+                if ($item->entity !== null) {
+                    $uris[$item->entity->getUri()] = true;
+                }
+                $item = $item->key;
+            }
+            if ($item instanceof QualifiedName) {
+                $uris[$item->getUri()] = true;
+            } elseif ($item instanceof Literal && $item->datatype !== null) {
+                $uris[$item->datatype->getUri()] = true;
+            }
+        }
+        return $uris;
+    }
 
     protected function resolveIdentifier(QualifiedName|string|null $id): ?QualifiedName
     {

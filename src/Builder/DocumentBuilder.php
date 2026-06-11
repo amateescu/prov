@@ -58,6 +58,9 @@ class DocumentBuilder extends RecordBuilder
             new NamespaceManager($this->namespaceManager),
         );
         $callback($bundleBuilder);
+        if ($this->keepUnusedNamespaces) {
+            $bundleBuilder->keepUnusedNamespaces();
+        }
         $this->bundles[] = $bundleBuilder->build();
         return $this;
     }
@@ -84,6 +87,11 @@ class DocumentBuilder extends RecordBuilder
     /**
      * Finalizes the builder and returns the immutable Document.
      *
+     * Namespace declarations are pruned to the ones the document's records
+     * (including bundle contents) actually reference, unless
+     * `keepUnusedNamespaces()` was called. Bundles attached with `addBundle()`
+     * keep their namespaces as built.
+     *
      * @throws \LogicException
      *   On a second call: builders are single-use.
      */
@@ -93,13 +101,22 @@ class DocumentBuilder extends RecordBuilder
 
         $bundles = $this->bundles;
         foreach ($this->bundleBuilders as $bb) {
+            if ($this->keepUnusedNamespaces) {
+                $bb->keepUnusedNamespaces();
+            }
             $bundles[] = $bb->build();
         }
 
-        return new Document(
-            records: $this->records,
-            bundles: $bundles,
-            namespaces: $this->namespaceManager->getRegisteredNamespaces(),
-        );
+        $namespaces = $this->namespaceManager->getRegisteredNamespaces();
+        if (!$this->keepUnusedNamespaces) {
+            $usedUris = self::collectReferencedUris($this->records);
+            foreach ($bundles as $bundle) {
+                $usedUris[$bundle->identifier->getUri()] = true;
+                $usedUris = self::collectReferencedUris($bundle->records, $usedUris);
+            }
+            $namespaces = self::pruneNamespaces($namespaces, $usedUris);
+        }
+
+        return new Document(records: $this->records, bundles: $bundles, namespaces: $namespaces);
     }
 }

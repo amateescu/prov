@@ -59,6 +59,8 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
     private int $blankNodeCounter = 0;
 
+    private ?PrefixMinter $minter = null;
+
     public function __construct(
         public readonly bool $prettyPrint = false,
     ) {
@@ -82,6 +84,8 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                 $nsManager->add($ns);
             }
         }
+        $minter = new PrefixMinter($nsManager);
+        $this->minter = $minter;
 
         $output = [];
 
@@ -106,6 +110,12 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             }
             $this->serializeRecords($bundle->records, $bundleData, $bundleNsManager);
             $output['bundle'][$bundleKey] = $bundleData;
+        }
+
+        // Declarations for namespaces minted while serializing records. Assigning
+        // into the existing 'prefix' key keeps its position in the output.
+        foreach ($minter->getMintedNamespaces() as $ns) {
+            $output['prefix'][$ns->prefix] = $ns->uri;
         }
 
         $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR;
@@ -457,7 +467,9 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         $result = [];
 
         foreach ($attributes->all() as $uri => $values) {
-            $key = $nsManager->uriToPrefixed($uri);
+            $key = $this->minter !== null
+                ? $this->minter->uriToPrefixed($uri, $nsManager)
+                : $nsManager->uriToPrefixed($uri);
             $isMultiValue = count($values) > 1;
             foreach ($values as $value) {
                 $serialized = $this->serializeAttributeValue($value);

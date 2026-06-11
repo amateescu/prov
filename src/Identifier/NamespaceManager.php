@@ -114,6 +114,9 @@ class NamespaceManager
             if ($resolved !== null) {
                 return $this->resolveCache[$shorthand] = $resolved;
             }
+            // Without this guard the prefix branch below would report the URI
+            // scheme as an unregistered prefix (e.g. "Prefix 'http' is not registered").
+            throw new NamespaceException("No registered namespace matches URI '{$shorthand}'.");
         }
 
         if (str_contains($shorthand, ':')) {

@@ -100,6 +100,8 @@ Coverage is partial: rules that need transitive graph reasoning over derivation 
 
 ## Builder tips
 
+**Namespaces.** Register namespaces one at a time (`namespace()`, `addNamespace()`) or in bulk from an application-wide registry (`addNamespaces($iterable)`). `build()` prunes the declarations down to the namespaces your records actually reference, so registering many namespaces up front does not bloat the serialized output; call `keepUnusedNamespaces()` to keep them all. Documents obtained from `Prov::deserialize()` are not affected: they keep every namespace they declared.
+
 **Attributes.** Pass attributes as an associative array: keys are resolved as namespace shorthands, and a list value adds one entry per element (that is how a repeated key is written, since PHP array keys are unique):
 
 ```php

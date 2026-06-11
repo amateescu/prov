@@ -363,12 +363,62 @@ final class DocumentBuilderTest extends TestCase
 
     public function testNamespacesPropagateToDocument(): void
     {
+        $this->builder->entity('ex:e1', ['prov:label' => Literal::string('typed')]);
         $doc = $this->builder->build();
 
         $prefixes = array_map(static fn(ProvNamespace $ns) => $ns->prefix, $doc->namespaces);
         $this->assertContains('ex', $prefixes);
         $this->assertContains('prov', $prefixes);
         $this->assertContains('xsd', $prefixes);
+    }
+
+    public function testBuildPrunesUnusedNamespaces(): void
+    {
+        $this->builder->namespace('unused', 'http://unused.example/');
+        $this->builder->entity('ex:e1');
+        $doc = $this->builder->build();
+
+        $prefixes = array_map(static fn(ProvNamespace $ns) => $ns->prefix, $doc->namespaces);
+        $this->assertSame(['ex'], $prefixes);
+    }
+
+    public function testKeepUnusedNamespacesDisablesPruning(): void
+    {
+        $this->builder->namespace('unused', 'http://unused.example/');
+        $this->builder->keepUnusedNamespaces();
+        $this->builder->entity('ex:e1');
+        $doc = $this->builder->build();
+
+        $prefixes = array_map(static fn(ProvNamespace $ns) => $ns->prefix, $doc->namespaces);
+        $this->assertContains('unused', $prefixes);
+        $this->assertContains('prov', $prefixes);
+        $this->assertContains('xsd', $prefixes);
+    }
+
+    public function testBundleRecordsKeepDocumentNamespacesAlive(): void
+    {
+        $this->builder->namespace('b', 'http://bundle-only.example/');
+        $this->builder->withBundle('ex:b1', static fn($bb) => $bb->entity('b:e1'));
+        $doc = $this->builder->build();
+
+        $prefixes = array_map(static fn(ProvNamespace $ns) => $ns->prefix, $doc->namespaces);
+        $this->assertContains('b', $prefixes);
+        $this->assertContains('ex', $prefixes);
+    }
+
+    public function testAddNamespacesRegistersAll(): void
+    {
+        $this->builder->addNamespaces([
+            new ProvNamespace('a', 'http://a.example/'),
+            new ProvNamespace('b', 'http://b.example/'),
+        ]);
+        $this->builder->entity('a:e1');
+        $this->builder->entity('b:e2');
+        $doc = $this->builder->build();
+
+        $prefixes = array_map(static fn(ProvNamespace $ns) => $ns->prefix, $doc->namespaces);
+        $this->assertContains('a', $prefixes);
+        $this->assertContains('b', $prefixes);
     }
 
     public function testBundleNestedApi(): void
