@@ -51,6 +51,27 @@ class RecordIndex
     /** @var array<string, \Prov\Activity> URI -> \Prov\Activity */
     private array $activities = [];
 
+    /** @var list<\Prov\Entity> */
+    private array $entityRecords = [];
+
+    /** @var list<\Prov\Activity> */
+    private array $activityRecords = [];
+
+    /** @var list<\Prov\Relation\Generation> */
+    private array $generations = [];
+
+    /** @var list<\Prov\Relation\Usage> */
+    private array $usages = [];
+
+    /** @var list<\Prov\Relation\Invalidation> */
+    private array $invalidations = [];
+
+    /** @var list<\Prov\Relation\Start> */
+    private array $starts = [];
+
+    /** @var list<\Prov\Relation\End> */
+    private array $ends = [];
+
     /** @var list<\Prov\Relation\Specialization> */
     private array $specializations = [];
 
@@ -104,27 +125,36 @@ class RecordIndex
                 $this->eventTypes[$id][] = $record::class;
             }
 
-            if ($record instanceof Generation) {
+            if ($record instanceof Entity) {
+                $this->entityRecords[] = $record;
+            } elseif ($record instanceof Activity) {
+                $this->activityRecords[] = $record;
+            } elseif ($record instanceof Generation) {
+                $this->generations[] = $record;
                 $eUri = $record->entity?->getUri();
                 if ($eUri !== null) {
                     $this->generationsByEntity[$eUri][] = $record;
                 }
             } elseif ($record instanceof Usage) {
+                $this->usages[] = $record;
                 $eUri = $record->entity?->getUri();
                 if ($eUri !== null) {
                     $this->usagesByEntity[$eUri][] = $record;
                 }
             } elseif ($record instanceof Invalidation) {
+                $this->invalidations[] = $record;
                 $eUri = $record->entity?->getUri();
                 if ($eUri !== null) {
                     $this->invalidationsByEntity[$eUri][] = $record;
                 }
             } elseif ($record instanceof Start) {
+                $this->starts[] = $record;
                 $aUri = $record->activity?->getUri();
                 if ($aUri !== null) {
                     $this->startsByActivity[$aUri][] = $record;
                 }
             } elseif ($record instanceof End) {
+                $this->ends[] = $record;
                 $aUri = $record->activity?->getUri();
                 if ($aUri !== null) {
                     $this->endsByActivity[$aUri][] = $record;
@@ -137,6 +167,48 @@ class RecordIndex
                 $this->memberships[] = $record;
             }
         }
+    }
+
+    /** @return list<\Prov\Entity> */
+    public function getEntities(): array
+    {
+        return $this->entityRecords;
+    }
+
+    /** @return list<\Prov\Activity> */
+    public function getActivities(): array
+    {
+        return $this->activityRecords;
+    }
+
+    /** @return list<\Prov\Relation\Generation> */
+    public function getGenerations(): array
+    {
+        return $this->generations;
+    }
+
+    /** @return list<\Prov\Relation\Usage> */
+    public function getUsages(): array
+    {
+        return $this->usages;
+    }
+
+    /** @return list<\Prov\Relation\Invalidation> */
+    public function getInvalidations(): array
+    {
+        return $this->invalidations;
+    }
+
+    /** @return list<\Prov\Relation\Start> */
+    public function getStarts(): array
+    {
+        return $this->starts;
+    }
+
+    /** @return list<\Prov\Relation\End> */
+    public function getEnds(): array
+    {
+        return $this->ends;
     }
 
     /** @return list<string> Element class names for this URI */

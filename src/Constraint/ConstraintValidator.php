@@ -217,11 +217,17 @@ class ConstraintValidator
     /** Constraint 54: Identifier can't be both an object (entity/activity/agent) and an event (relation). */
     private function checkConstraint54(RecordIndex $index, ConstraintViolationList $violations): void
     {
+        $checked = [];
         foreach ($index->getRecords() as $record) {
             if ($record->identifier === null) {
                 continue;
             }
             $uri = $record->identifier->getUri();
+            // Report each conflicting identifier once, not once per record carrying it.
+            if (isset($checked[$uri])) {
+                continue;
+            }
+            $checked[$uri] = true;
             $elementTypes = $index->getElementTypes($uri);
             $eventTypes = $index->getEventTypes($uri);
             if ($elementTypes !== [] && $eventTypes !== []) {
@@ -290,107 +296,129 @@ class ConstraintValidator
     // ================================================================
 
     /**
-     * Constraint 24: unique-generation. For given (entity, activity), at most one generation.
-     * Records sharing the same identifier are scruffy duplicates (merge candidates), not violations.
+     * Constraint 24: unique-generation. For a given (entity, activity) pair there is
+     * at most one generation event.
      */
     private function checkConstraint24(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        $seen = []; // pair -> first record's identifier URI
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Generation || $record->entity === null || $record->activity === null) {
+        $groups = [];
+        foreach ($index->getGenerations() as $record) {
+            if ($record->entity === null || $record->activity === null) {
                 continue;
             }
-            $pair = $record->entity->getUri() . '|' . $record->activity->getUri();
-            $myId = $record->identifier?->getUri();
-            if (isset($seen[$pair]) && $seen[$pair] !== $myId) {
-                $violations->add(
-                    new ConstraintViolation(
-                        ConstraintId::UniqueGeneration,
-                        "Multiple generations for entity '{$record->entity->getUri()}' by activity '{$record->activity->getUri()}'.",
-                        $myId,
-                    ),
-                );
-            }
-            if (!isset($seen[$pair])) {
-                $seen[$pair] = $myId;
-            }
+            $this->collectUniqueEventGroup($groups, $record, $record->entity->getUri(), $record->activity->getUri());
         }
+        $this->reportUniqueEventConflicts(
+            $groups,
+            $violations,
+            ConstraintId::UniqueGeneration,
+            static fn(string $a, string $b): string => "Multiple generations for entity '{$a}' by activity '{$b}'.",
+        );
     }
 
     /** Constraint 25: unique-invalidation. */
     private function checkConstraint25(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        $seen = [];
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Invalidation || $record->entity === null || $record->activity === null) {
+        $groups = [];
+        foreach ($index->getInvalidations() as $record) {
+            if ($record->entity === null || $record->activity === null) {
                 continue;
             }
-            $pair = $record->entity->getUri() . '|' . $record->activity->getUri();
-            $myId = $record->identifier?->getUri();
-            if (isset($seen[$pair]) && $seen[$pair] !== $myId) {
-                $violations->add(
-                    new ConstraintViolation(
-                        ConstraintId::UniqueInvalidation,
-                        "Multiple invalidations for entity '{$record->entity->getUri()}' by activity '{$record->activity->getUri()}'.",
-                        $myId,
-                    ),
-                );
-            }
-            if (!isset($seen[$pair])) {
-                $seen[$pair] = $myId;
-            }
+            $this->collectUniqueEventGroup($groups, $record, $record->entity->getUri(), $record->activity->getUri());
         }
+        $this->reportUniqueEventConflicts(
+            $groups,
+            $violations,
+            ConstraintId::UniqueInvalidation,
+            static fn(string $a, string $b): string => "Multiple invalidations for entity '{$a}' by activity '{$b}'.",
+        );
     }
 
-    /** Constraint 26: unique-wasStartedBy. Scruffy duplicates (same ID) are not violations. */
+    /** Constraint 26: unique-wasStartedBy. */
     private function checkConstraint26(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        $seen = [];
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Start || $record->activity === null) {
+        $groups = [];
+        foreach ($index->getStarts() as $record) {
+            if ($record->activity === null) {
                 continue;
             }
             $starterUri = $record->starter?->getUri() ?? '_unspecified';
-            $pair = $record->activity->getUri() . '|' . $starterUri;
-            $myId = $record->identifier?->getUri();
-            if (isset($seen[$pair]) && $seen[$pair] !== $myId) {
-                $violations->add(
-                    new ConstraintViolation(
-                        ConstraintId::UniqueWasStartedBy,
-                        "Multiple starts for activity '{$record->activity->getUri()}'.",
-                        $myId,
-                    ),
-                );
-            }
-            if (!isset($seen[$pair])) {
-                $seen[$pair] = $myId;
-            }
+            $this->collectUniqueEventGroup($groups, $record, $record->activity->getUri(), $starterUri);
         }
+        $this->reportUniqueEventConflicts(
+            $groups,
+            $violations,
+            ConstraintId::UniqueWasStartedBy,
+            static fn(string $a, string $_b): string => "Multiple starts for activity '{$a}'.",
+        );
     }
 
-    /** Constraint 27: unique-wasEndedBy. Scruffy duplicates (same ID) are not violations. */
+    /** Constraint 27: unique-wasEndedBy. */
     private function checkConstraint27(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        $seen = [];
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof End || $record->activity === null) {
+        $groups = [];
+        foreach ($index->getEnds() as $record) {
+            if ($record->activity === null) {
                 continue;
             }
             $enderUri = $record->ender?->getUri() ?? '_unspecified';
-            $pair = $record->activity->getUri() . '|' . $enderUri;
-            $myId = $record->identifier?->getUri();
-            if (isset($seen[$pair]) && $seen[$pair] !== $myId) {
-                $violations->add(
-                    new ConstraintViolation(
-                        ConstraintId::UniqueWasEndedBy,
-                        "Multiple ends for activity '{$record->activity->getUri()}'.",
-                        $myId,
-                    ),
-                );
+            $this->collectUniqueEventGroup($groups, $record, $record->activity->getUri(), $enderUri);
+        }
+        $this->reportUniqueEventConflicts(
+            $groups,
+            $violations,
+            ConstraintId::UniqueWasEndedBy,
+            static fn(string $a, string $_b): string => "Multiple ends for activity '{$a}'.",
+        );
+    }
+
+    /**
+     * Folds one event record into its uniqueness group, keyed by the pair of
+     * subject URIs the constraint quantifies over.
+     *
+     * @param array<string, array{subjects: array{string, string}, ids: array<string, true>, times: array<string, string>}> $groups
+     */
+    private function collectUniqueEventGroup(
+        array &$groups,
+        Generation|Invalidation|Start|End $record,
+        string $subjectA,
+        string $subjectB,
+    ): void {
+        $pair = $subjectA . '|' . $subjectB;
+        $groups[$pair] ??= ['subjects' => [$subjectA, $subjectB], 'ids' => [], 'times' => []];
+
+        $id = $record->identifier?->getUri();
+        if ($id !== null) {
+            $groups[$pair]['ids'][$id] = true;
+        }
+        if ($record->time !== null) {
+            // Keyed per statement: restating one identified event is not a second
+            // event, while every anonymous record counts as its own statement.
+            $statementKey = $id ?? '_anon_' . spl_object_id($record);
+            $groups[$pair]['times'][$statementKey] ??= $record->time->format('U.u');
+        }
+    }
+
+    /**
+     * Flags each group that states more than one event: either two distinct
+     * non-null identifiers, or (since anonymous records merge into the same
+     * event) two distinct concrete event times.
+     *
+     * @param array<string, array{subjects: array{string, string}, ids: array<string, true>, times: array<string, string>}> $groups
+     * @param \Closure(string, string): string $message
+     */
+    private function reportUniqueEventConflicts(
+        array $groups,
+        ConstraintViolationList $violations,
+        ConstraintId $constraint,
+        \Closure $message,
+    ): void {
+        foreach ($groups as $group) {
+            if (count($group['ids']) <= 1 && count(array_unique($group['times'])) <= 1) {
+                continue;
             }
-            if (!isset($seen[$pair])) {
-                $seen[$pair] = $myId;
-            }
+            [$subjectA, $subjectB] = $group['subjects'];
+            $violations->add(new ConstraintViolation($constraint, $message($subjectA, $subjectB), $subjectA));
         }
     }
 
@@ -482,10 +510,7 @@ class ConstraintValidator
     /** Constraint 28: Activity startTime must match its start event time. */
     private function checkConstraint28(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Activity) {
-                continue;
-            }
+        foreach ($index->getActivities() as $record) {
             $identifier = $record->identifier;
             if ($identifier === null || $record->startTime === null) {
                 continue;
@@ -508,10 +533,7 @@ class ConstraintValidator
     /** Constraint 29: Activity endTime must match its end event time. */
     private function checkConstraint29(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Activity) {
-                continue;
-            }
+        foreach ($index->getActivities() as $record) {
             $identifier = $record->identifier;
             if ($identifier === null || $record->endTime === null) {
                 continue;
@@ -534,10 +556,7 @@ class ConstraintValidator
     /** Constraint 30: Start must precede end for the same activity. */
     private function checkConstraint30(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Activity) {
-                continue;
-            }
+        foreach ($index->getActivities() as $record) {
             $identifier = $record->identifier;
             if ($identifier === null) {
                 continue;
@@ -581,8 +600,8 @@ class ConstraintValidator
     /** Constraint 33: Usage must occur within activity timespan. */
     private function checkConstraint33(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Usage || $record->activity === null || $record->time === null) {
+        foreach ($index->getUsages() as $record) {
+            if ($record->activity === null || $record->time === null) {
                 continue;
             }
             $activity = $index->getActivity($record->activity->getUri());
@@ -613,8 +632,8 @@ class ConstraintValidator
     /** Constraint 34: Generation must occur within activity timespan. */
     private function checkConstraint34(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Generation || $record->activity === null || $record->time === null) {
+        foreach ($index->getGenerations() as $record) {
+            if ($record->activity === null || $record->time === null) {
                 continue;
             }
             $activity = $index->getActivity($record->activity->getUri());
@@ -645,10 +664,7 @@ class ConstraintValidator
     /** Constraint 36: Generation must precede invalidation for the same entity. */
     private function checkConstraint36(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Entity) {
-                continue;
-            }
+        foreach ($index->getEntities() as $record) {
             $identifier = $record->identifier;
             if ($identifier === null) {
                 continue;
@@ -679,10 +695,7 @@ class ConstraintValidator
     /** Constraint 37: Generation must precede usage for the same entity. */
     private function checkConstraint37(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Entity) {
-                continue;
-            }
+        foreach ($index->getEntities() as $record) {
             $identifier = $record->identifier;
             if ($identifier === null) {
                 continue;
@@ -713,10 +726,7 @@ class ConstraintValidator
     /** Constraint 38: Usage must precede invalidation for the same entity. */
     private function checkConstraint38(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Entity) {
-                continue;
-            }
+        foreach ($index->getEntities() as $record) {
             $identifier = $record->identifier;
             if ($identifier === null) {
                 continue;
@@ -751,10 +761,7 @@ class ConstraintValidator
     private function checkConstraint39(RecordIndex $index, ConstraintViolationList $violations): void
     {
         $checked = [];
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Entity) {
-                continue;
-            }
+        foreach ($index->getEntities() as $record) {
             $identifier = $record->identifier;
             if ($identifier === null) {
                 continue;
@@ -797,10 +804,7 @@ class ConstraintValidator
     private function checkConstraint40(RecordIndex $index, ConstraintViolationList $violations): void
     {
         $checked = [];
-        foreach ($index->getRecords() as $record) {
-            if (!$record instanceof Entity) {
-                continue;
-            }
+        foreach ($index->getEntities() as $record) {
             $identifier = $record->identifier;
             if ($identifier === null) {
                 continue;

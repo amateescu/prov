@@ -350,6 +350,191 @@ final class ConstraintValidatorTest extends TestCase
         $this->assertEmpty($v->getViolationsByConstraint(24));
     }
 
+    public function testConstraint24AnonymousGenerationsWithDifferentTimes(): void
+    {
+        // Two id-less generations of the same (entity, activity) pair state two
+        // distinct events, so their concrete times must agree.
+        $b = $this->buildDoc();
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(24));
+    }
+
+    public function testConstraint24AnonymousGenerationsWithSameTimeAreValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertEmpty($v->getViolationsByConstraint(24));
+    }
+
+    // --- Constraint 25: unique-invalidation ---
+
+    public function testConstraint25DuplicateInvalidationDifferentIds(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasInvalidatedBy(identifier: 'ex:i1', entity: 'ex:e1', activity: 'ex:a1');
+        $b->wasInvalidatedBy(identifier: 'ex:i2', entity: 'ex:e1', activity: 'ex:a1');
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(25));
+    }
+
+    public function testConstraint25AnonymousInvalidationsWithDifferentTimes(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(25));
+    }
+
+    public function testConstraint25DistinctPairsAreValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasInvalidatedBy(identifier: 'ex:i1', entity: 'ex:e1', activity: 'ex:a1');
+        $b->wasInvalidatedBy(identifier: 'ex:i2', entity: 'ex:e1', activity: 'ex:a2');
+        $v = $this->validate($b);
+        $this->assertEmpty($v->getViolationsByConstraint(25));
+    }
+
+    // --- Constraint 26: unique-wasStartedBy ---
+
+    public function testConstraint26DuplicateStartDifferentIds(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasStartedBy(identifier: 'ex:s1', activity: 'ex:a1', starter: 'ex:a0');
+        $b->wasStartedBy(identifier: 'ex:s2', activity: 'ex:a1', starter: 'ex:a0');
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(26));
+    }
+
+    public function testConstraint26AnonymousStartsWithDifferentTimes(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasStartedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->wasStartedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(26));
+    }
+
+    public function testConstraint26DifferentStartersAreValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasStartedBy(identifier: 'ex:s1', activity: 'ex:a1', starter: 'ex:a0');
+        $b->wasStartedBy(identifier: 'ex:s2', activity: 'ex:a1', starter: 'ex:a2');
+        $v = $this->validate($b);
+        $this->assertEmpty($v->getViolationsByConstraint(26));
+    }
+
+    // --- Constraint 27: unique-wasEndedBy ---
+
+    public function testConstraint27DuplicateEndDifferentIds(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasEndedBy(identifier: 'ex:end1', activity: 'ex:a1', ender: 'ex:a0');
+        $b->wasEndedBy(identifier: 'ex:end2', activity: 'ex:a1', ender: 'ex:a0');
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(27));
+    }
+
+    public function testConstraint27AnonymousEndsWithDifferentTimes(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasEndedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->wasEndedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(27));
+    }
+
+    public function testConstraint27ScruffyDuplicatesSameIdIsValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasEndedBy(identifier: 'ex:end1', activity: 'ex:a1');
+        $b->wasEndedBy(identifier: 'ex:end1', activity: 'ex:a1');
+        $v = $this->validate($b);
+        $this->assertEmpty($v->getViolationsByConstraint(27));
+    }
+
+    // --- Constraint 38: usage-precedes-invalidation ---
+
+    public function testConstraint38UsageAfterInvalidation(): void
+    {
+        $b = $this->buildDoc();
+        $b->entity('ex:e1');
+        $b->used(activity: 'ex:a1', entity: 'ex:e1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(38));
+    }
+
+    public function testConstraint38UsageBeforeInvalidationIsValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->entity('ex:e1');
+        $b->used(activity: 'ex:a1', entity: 'ex:e1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertEmpty($v->getViolationsByConstraint(38));
+    }
+
+    // --- Constraint 50: typing ---
+
+    public function testConstraint50EntityAndActivityRolesInReferences(): void
+    {
+        // ex:x is referenced as an entity by one relation and as an activity by
+        // another, without being declared as either element.
+        $b = $this->buildDoc();
+        $b->wasGeneratedBy(entity: 'ex:x', activity: 'ex:a1');
+        $b->used(activity: 'ex:x', entity: 'ex:e2');
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(50));
+    }
+
+    public function testConstraint50ConsistentRolesAreValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1');
+        $b->used(activity: 'ex:a1', entity: 'ex:e1');
+        $v = $this->validate($b);
+        $this->assertEmpty($v->getViolationsByConstraint(50));
+    }
+
+    public function testConstraint50DefersToConstraint55ForDeclaredElements(): void
+    {
+        // When the identifier is declared as both element types, the conflict is
+        // entity-activity-disjoint (55) territory, not a typing violation.
+        $b = $this->buildDoc();
+        $b->entity('ex:x');
+        $b->activity('ex:x');
+        $b->wasGeneratedBy(entity: 'ex:x', activity: 'ex:a1');
+        $b->used(activity: 'ex:x', entity: 'ex:e2');
+        $v = $this->validate($b);
+        $this->assertEmpty($v->getViolationsByConstraint(50));
+        $this->assertCount(1, $v->getViolationsByConstraint(55));
+    }
+
+    // --- Constraint 54: impossible-object-property-overlap ---
+
+    public function testConstraint54ElementAndRelationShareIdentifier(): void
+    {
+        $b = $this->buildDoc();
+        $b->entity('ex:x');
+        $b->wasGeneratedBy(identifier: 'ex:x', entity: 'ex:e1', activity: 'ex:a1');
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(54));
+    }
+
+    public function testConstraint54DistinctIdentifiersAreValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->entity('ex:e1');
+        $b->wasGeneratedBy(identifier: 'ex:g1', entity: 'ex:e1', activity: 'ex:a1');
+        $v = $this->validate($b);
+        $this->assertEmpty($v->getViolationsByConstraint(54));
+    }
+
     // --- ConstraintViolationList API ---
 
     public function testViolationListCountable(): void
