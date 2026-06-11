@@ -1,0 +1,226 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Prov\Tests\Operation;
+
+use PHPUnit\Framework\TestCase;
+use Prov\Builder\DocumentBuilder;
+use Prov\Document;
+use Prov\Entity;
+use Prov\Exception\NamespaceException;
+use Prov\Operation\ProvGraph;
+use Prov\Relation\Association;
+use Prov\Relation\Derivation;
+use Prov\Relation\Dictionary\DictionaryEntry;
+use Prov\Relation\Generation;
+use Prov\Relation\Usage;
+
+final class ProvGraphTest extends TestCase
+{
+    private function buildDocument(): Document
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->entity('ex:article');
+        $builder->entity('ex:draft');
+        $builder->activity('ex:writing');
+        $builder->agent('ex:alice');
+        $builder->wasGeneratedBy(entity: 'ex:article', activity: 'ex:writing', identifier: 'ex:gen1');
+        $builder->used(activity: 'ex:writing', entity: 'ex:draft', identifier: 'ex:use1');
+        $builder->wasDerivedFrom(
+            generatedEntity: 'ex:article',
+            usedEntity: 'ex:draft',
+            activity: 'ex:writing',
+            identifier: 'ex:der1',
+        );
+        $builder->wasAssociatedWith(activity: 'ex:writing', agent: 'ex:alice', plan: 'ex:draft');
+        return $builder->build();
+    }
+
+    public function testRecordByIdentifier(): void
+    {
+        $graph = new ProvGraph($this->buildDocument());
+
+        $record = $graph->recordByIdentifier('ex:article');
+        $this->assertInstanceOf(Entity::class, $record);
+        $this->assertSame('http://example.org/article', $record->identifier?->getUri());
+
+        $this->assertInstanceOf(Generation::class, $graph->recordByIdentifier('ex:gen1'));
+        $this->assertNull($graph->recordByIdentifier('ex:missing'));
+    }
+
+    public function testRelationsFromMatchesSubject(): void
+    {
+        $graph = new ProvGraph($this->buildDocument());
+
+        $fromArticle = $graph->relationsFrom('ex:article');
+        $this->assertCount(2, $fromArticle);
+        $this->assertInstanceOf(Generation::class, $fromArticle[0]);
+        $this->assertInstanceOf(Derivation::class, $fromArticle[1]);
+
+        $fromWriting = $graph->relationsFrom('ex:writing');
+        $this->assertCount(2, $fromWriting);
+        $this->assertInstanceOf(Usage::class, $fromWriting[0]);
+        $this->assertInstanceOf(Association::class, $fromWriting[1]);
+    }
+
+    public function testRelationsToMatchesObject(): void
+    {
+        $graph = new ProvGraph($this->buildDocument());
+
+        $toWriting = $graph->relationsTo('ex:writing');
+        $this->assertCount(1, $toWriting);
+        $this->assertInstanceOf(Generation::class, $toWriting[0]);
+
+        $toAlice = $graph->relationsTo('ex:alice');
+        $this->assertCount(1, $toAlice);
+        $this->assertInstanceOf(Association::class, $toAlice[0]);
+    }
+
+    public function testRelationsReferencingIncludesSecondaryEndpoints(): void
+    {
+        $graph = new ProvGraph($this->buildDocument());
+
+        // ex:writing is the Derivation's activity (third endpoint) and the
+        // subject or object of three other relations.
+        $referencing = $graph->relationsReferencing('ex:writing');
+        $this->assertCount(4, $referencing);
+
+        // ex:draft is the Association's plan (third endpoint).
+        $planRefs = array_filter(
+            $graph->relationsReferencing('ex:draft'),
+            static fn($relation) => $relation instanceof Association,
+        );
+        $this->assertCount(1, $planRefs);
+    }
+
+    public function testGenerationsOfAndUsagesOf(): void
+    {
+        $graph = new ProvGraph($this->buildDocument());
+
+        $generations = $graph->generationsOf('ex:article');
+        $this->assertCount(1, $generations);
+        $this->assertSame('http://example.org/gen1', $generations[0]->identifier?->getUri());
+
+        $usages = $graph->usagesOf('ex:draft');
+        $this->assertCount(1, $usages);
+        $this->assertSame('http://example.org/use1', $usages[0]->identifier?->getUri());
+
+        // usagesOf is entity-centric: the activity has no usages "of" it.
+        $this->assertSame([], $graph->usagesOf('ex:writing'));
+    }
+
+    public function testIdentifierFormsAreEquivalent(): void
+    {
+        $document = $this->buildDocument();
+        $graph = new ProvGraph($document);
+        $qn = $document->entities[0]->identifier;
+        $this->assertNotNull($qn);
+
+        $byQn = $graph->generationsOf($qn);
+        $byShorthand = $graph->generationsOf('ex:article');
+        $byUri = $graph->generationsOf('http://example.org/article');
+
+        $this->assertSame($byQn, $byShorthand);
+        $this->assertSame($byQn, $byUri);
+    }
+
+    public function testUnknownPrefixThrows(): void
+    {
+        $graph = new ProvGraph($this->buildDocument());
+
+        $this->expectException(NamespaceException::class);
+        $graph->relationsFrom('nope:article');
+    }
+
+    public function testBlankNodeEndpoints(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $blank = $builder->blank();
+        $builder->entity($blank);
+        $builder->wasGeneratedBy(entity: $blank, activity: 'ex:a1');
+        $graph = new ProvGraph($builder->build());
+
+        $this->assertCount(1, $graph->relationsFrom($blank));
+        $this->assertCount(1, $graph->relationsFrom('_:b1'));
+        $this->assertInstanceOf(Entity::class, $graph->recordByIdentifier('_:b1'));
+    }
+
+    public function testWrapsBundles(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $bundleBuilder = $builder->bundle('ex:b1');
+        $bundleBuilder->entity('ex:e1');
+        $bundleBuilder->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1');
+        $document = $builder->build();
+
+        // The bundle declares no namespaces of its own ('ex' lives on the
+        // document), so the lookup uses the full URI form.
+        $graph = new ProvGraph($document->bundles[0]);
+        $this->assertCount(1, $graph->generationsOf('http://example.org/e1'));
+    }
+
+    public function testBundleShorthandsResolveViaOwnNamespaces(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $bundleBuilder = $builder->bundle('ex:b1');
+        $bundleBuilder->namespace('bx', 'http://bundle.example/');
+        $bundleBuilder->entity('bx:e1');
+        $bundleBuilder->wasGeneratedBy(entity: 'bx:e1', activity: 'bx:a1');
+        $document = $builder->build();
+
+        $graph = new ProvGraph($document->bundles[0]);
+        $this->assertCount(1, $graph->generationsOf('bx:e1'));
+        $this->assertCount(1, $graph->generationsOf('http://bundle.example/e1'));
+    }
+
+    public function testReferencedIdentifiersInPositionalOrder(): void
+    {
+        $document = $this->buildDocument();
+        $derivation = $document->getRecordsByType(Derivation::class)[0];
+
+        $uris = array_map(static fn($qn) => $qn->getUri(), ProvGraph::referencedIdentifiers($derivation));
+        $this->assertSame(
+            [
+                'http://example.org/article',
+                'http://example.org/draft',
+                'http://example.org/writing',
+            ],
+            $uris,
+        );
+    }
+
+    public function testReferencedIdentifiersIncludesDictionaryEntities(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->hadDictionaryMember(dictionary: 'ex:dict', keyEntityPairs: [new DictionaryEntry(
+            'k1',
+            $builder->blank(),
+        )]);
+        $document = $builder->build();
+        $membership = $document->relations[0];
+
+        $uris = array_map(static fn($qn) => $qn->getUri(), ProvGraph::referencedIdentifiers($membership));
+        $this->assertSame(['http://example.org/dict', '_:b1'], $uris);
+
+        $graph = new ProvGraph($document);
+        $this->assertSame([$membership], $graph->relationsReferencing('_:b1'));
+    }
+
+    public function testRepeatedEndpointListedOnce(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasInformedBy(informed: 'ex:a1', informant: 'ex:a1');
+        $graph = new ProvGraph($builder->build());
+
+        $this->assertCount(1, $graph->relationsReferencing('ex:a1'));
+        $this->assertCount(1, $graph->relationsFrom('ex:a1'));
+        $this->assertCount(1, $graph->relationsTo('ex:a1'));
+    }
+}

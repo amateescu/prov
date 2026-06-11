@@ -81,6 +81,27 @@ $flat = DocumentOperations::flattenDroppingMentions($docWithBundles);
 DocumentComparator::equals($a, $b);  // structural (semantic) equality
 ```
 
+## Querying a document
+
+`ProvGraph` indexes a document (or bundle) once and answers edge queries by identifier, accepting `QualifiedName` objects, `prefix:local` shorthands, or full URIs:
+
+```php
+use Prov\Operation\ProvGraph;
+
+$graph = new ProvGraph($document);
+
+$graph->relationsFrom('ex:article');       // relations whose subject is ex:article
+$graph->relationsTo('ex:writing');         // relations whose object is ex:writing
+$graph->relationsReferencing('ex:plan');   // any endpoint, including secondary ones
+$graph->generationsOf('ex:article');       // Generation records of an entity
+$graph->usagesOf('ex:draft');              // Usage records of an entity
+$graph->recordByIdentifier('ex:article');  // O(1) record lookup
+
+ProvGraph::referencedIdentifiers($relation);  // every endpoint of one relation
+```
+
+The graph covers the container's own records; flatten a document first to query across bundle boundaries. For type-centric queries (`all Usage records`), `Document::getRecordsByType()` remains the right tool.
+
 ## Validation
 
 ```php
