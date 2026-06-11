@@ -200,4 +200,70 @@ final class AttributesTest extends TestCase
             ->with($key, true);
         $this->assertSame([1, 'three', true], $attrs->getScalars($key));
     }
+
+    public function testKeysReturnsQualifiedNameObjects(): void
+    {
+        $key1 = $this->prov->qualifiedName('type');
+        $key2 = $this->prov->qualifiedName('label');
+        $attrs = new Attributes()
+            ->with($key1, 'Document')
+            ->with($key2, 'My Doc')
+            ->with($key1, 'Article');
+
+        $this->assertSame([$key1, $key2], $attrs->keys());
+    }
+
+    public function testKeysPreservedByFromAndSingle(): void
+    {
+        $key = $this->prov->qualifiedName('type');
+
+        $this->assertSame([$key], Attributes::from([[$key, 'a']])->keys());
+        $this->assertSame([$key], Attributes::single($key, 'a')->keys());
+    }
+
+    public function testKeysOnEmptyBag(): void
+    {
+        $this->assertSame([], new Attributes()->keys());
+    }
+
+    public function testKeysDerivedFromRawUriData(): void
+    {
+        $attrs = new Attributes(['http://example.org/ns#label' => ['x']]);
+
+        $keys = $attrs->keys();
+        $this->assertCount(1, $keys);
+        $this->assertSame('label', $keys[0]->localPart);
+        $this->assertSame('http://example.org/ns#', $keys[0]->namespace->uri);
+        $this->assertSame('http://example.org/ns#label', $keys[0]->getUri());
+    }
+
+    public function testIterationYieldsEachValueWithQualifiedNameKey(): void
+    {
+        $key1 = $this->prov->qualifiedName('type');
+        $key2 = $this->prov->qualifiedName('label');
+        $attrs = new Attributes()
+            ->with($key1, 'Document')
+            ->with($key1, 'Article')
+            ->with($key2, 42);
+
+        $pairs = [];
+        foreach ($attrs as $key => $value) {
+            $pairs[] = [$key, $value];
+        }
+
+        $this->assertSame([[$key1, 'Document'], [$key1, 'Article'], [$key2, 42]], $pairs);
+    }
+
+    public function testCountIsTotalNumberOfValues(): void
+    {
+        $key1 = $this->prov->qualifiedName('type');
+        $key2 = $this->prov->qualifiedName('label');
+        $attrs = new Attributes()
+            ->with($key1, 'Document')
+            ->with($key1, 'Article')
+            ->with($key2, 'My Doc');
+
+        $this->assertCount(3, $attrs);
+        $this->assertCount(0, new Attributes());
+    }
 }

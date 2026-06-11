@@ -85,6 +85,56 @@ final class DocumentBuilderTest extends TestCase
         $this->assertFalse($entity->attributes->isEmpty());
     }
 
+    public function testArrayAttributeListValueCreatesMultipleEntries(): void
+    {
+        $this->builder->entity('ex:e1', ['prov:atLocation' => ['ex:a', 'ex:b']]);
+        $doc = $this->builder->build();
+
+        $key = ProvNamespace::prov()->qualifiedName('atLocation');
+        $this->assertSame(['ex:a', 'ex:b'], $doc->entities[0]->attributes->get($key));
+    }
+
+    public function testProvTypeStringShorthandResolvesToQualifiedName(): void
+    {
+        $this->builder->entity('ex:e1', ['prov:type' => 'ex:Document']);
+        $doc = $this->builder->build();
+
+        $value = $doc->entities[0]->attributes->firstValue(ProvNamespace::prov()->qualifiedName('type'));
+        $this->assertInstanceOf(\Prov\Identifier\QualifiedName::class, $value);
+        $this->assertSame('http://example.org/Document', $value->getUri());
+    }
+
+    public function testProvTypeUnregisteredShorthandStaysString(): void
+    {
+        $this->builder->entity('ex:e1', ['prov:type' => 'workspace:stage']);
+        $doc = $this->builder->build();
+
+        $value = $doc->entities[0]->attributes->firstValue(ProvNamespace::prov()->qualifiedName('type'));
+        $this->assertSame('workspace:stage', $value);
+    }
+
+    public function testNonTypeKeyStringValueStaysString(): void
+    {
+        $this->builder->entity('ex:e1', ['ex:related' => 'ex:other']);
+        $doc = $this->builder->build();
+
+        $value = $doc->entities[0]->attributes->firstValue($this->ex->qualifiedName('related'));
+        $this->assertSame('ex:other', $value);
+    }
+
+    public function testRelationIdentifierIsLastParameter(): void
+    {
+        // Positional endpoints bind in PROV-N order; the relation id stays null
+        // unless passed explicitly (by name, or as the trailing argument).
+        $this->builder->wasGeneratedBy('ex:e1', 'ex:a1');
+        $doc = $this->builder->build();
+
+        $generation = $doc->getRecordsByType(Generation::class)[0];
+        $this->assertNull($generation->identifier);
+        $this->assertSame('http://example.org/e1', $generation->entity?->getUri());
+        $this->assertSame('http://example.org/a1', $generation->activity?->getUri());
+    }
+
     public function testEntityWithAttributesObject(): void
     {
         $prov = new ProvNamespace('prov', 'http://www.w3.org/ns/prov#');

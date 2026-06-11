@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Prov\Attribute;
 
+use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
 
 /**
@@ -11,17 +12,31 @@ use Prov\Identifier\QualifiedName;
  * typed literals, QualifiedName references, or plain scalars; multiple
  * values per key are allowed.
  *
- * Construct with `Attributes::from(...)`, `Attributes::single(...)`, or
- * share the empty singleton via `Attributes::empty()`. Derive new
- * instances with `with()`.
+ * Construct with `Attributes::from(...)`, `Attributes::single(...)`, an
+ * `AttributesBuilder`, or share the empty singleton via `Attributes::empty()`.
+ * Derive new instances with `with()`.
+ *
+ * The bag is iterable (each key-value pair is yielded separately, with the
+ * key as a QualifiedName) and countable (total number of values across all
+ * keys). `keys()` lists the distinct keys as QualifiedName objects.
+ *
+ * @implements \IteratorAggregate<\Prov\Identifier\QualifiedName, \Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool>
  */
-readonly class Attributes
+readonly class Attributes implements \Countable, \IteratorAggregate
 {
     /**
      * @param array<string, list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool>> $data
+     *   Values keyed by the full URI of their attribute key.
+     * @param array<string, \Prov\Identifier\QualifiedName> $keys
+     *   QualifiedName key objects, keyed by the same URIs as $data. Entries may
+     *   be omitted; `keys()` and iteration then derive a QualifiedName from the
+     *   URI itself, minting a prefix. All library construction paths populate
+     *   this map, so original prefixes are preserved unless an instance is
+     *   constructed directly from raw URI-keyed data.
      */
     public function __construct(
         private array $data = [],
+        private array $keys = [],
     ) {}
 
     /**
@@ -39,9 +54,12 @@ readonly class Attributes
      */
     public function with(QualifiedName $key, QualifiedName|Literal|string|int|float|bool $value): self
     {
+        $uri = $key->getUri();
         $data = $this->data;
-        $data[$key->getUri()][] = $value;
-        return new self($data);
+        $keys = $this->keys;
+        $data[$uri][] = $value;
+        $keys[$uri] ??= $key;
+        return new self($data, $keys);
     }
 
     /**
@@ -52,10 +70,13 @@ readonly class Attributes
     public static function from(array $pairs): self
     {
         $data = [];
+        $keys = [];
         foreach ($pairs as [$key, $value]) {
-            $data[$key->getUri()][] = $value;
+            $uri = $key->getUri();
+            $data[$uri][] = $value;
+            $keys[$uri] ??= $key;
         }
-        return new self($data);
+        return new self($data, $keys);
     }
 
     /**
@@ -63,7 +84,7 @@ readonly class Attributes
      */
     public static function single(QualifiedName $key, QualifiedName|Literal|string|int|float|bool $value): self
     {
-        return new self([$key->getUri() => [$value]]);
+        return new self([$key->getUri() => [$value]], [$key->getUri() => $key]);
     }
 
     /**
@@ -147,10 +168,75 @@ readonly class Attributes
     }
 
     /**
+     * The distinct attribute keys, as QualifiedName objects.
+     *
+     * @return list<\Prov\Identifier\QualifiedName>
+     */
+    public function keys(): array
+    {
+        $out = [];
+        foreach (array_keys($this->data) as $uri) {
+            $out[] = $this->keyFor($uri);
+        }
+        return $out;
+    }
+
+    /**
+     * Yields each value separately under its QualifiedName key, so a key with
+     * multiple values is visited once per value. Keys are objects; collect
+     * pairs with a foreach rather than iterator_to_array(), which requires
+     * int|string keys.
+     *
+     * @return \Generator<\Prov\Identifier\QualifiedName, \Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool>
+     */
+    public function getIterator(): \Generator
+    {
+        foreach ($this->data as $uri => $values) {
+            $key = $this->keyFor($uri);
+            foreach ($values as $value) {
+                yield $key => $value;
+            }
+        }
+    }
+
+    /**
+     * Total number of values across all keys (matches the iteration length).
+     */
+    public function count(): int
+    {
+        $count = 0;
+        foreach ($this->data as $values) {
+            $count += count($values);
+        }
+        return $count;
+    }
+
+    /**
      * Whether the bag holds no values.
      */
     public function isEmpty(): bool
     {
         return $this->data === [];
+    }
+
+    /**
+     * Returns the QualifiedName for a key URI. For instances constructed from
+     * raw URI-keyed data without key objects, one is derived from the URI: the
+     * local part starts after the last '#' or '/', and the prefix is minted
+     * deterministically from the namespace URI.
+     */
+    private function keyFor(string $uri): QualifiedName
+    {
+        if (isset($this->keys[$uri])) {
+            return $this->keys[$uri];
+        }
+
+        $hashPos = strrpos($uri, '#');
+        $slashPos = strrpos($uri, '/');
+        $pos = max($hashPos === false ? -1 : $hashPos, $slashPos === false ? -1 : $slashPos);
+        $nsUri = substr($uri, 0, $pos + 1);
+        $localPart = substr($uri, $pos + 1);
+
+        return new QualifiedName(new ProvNamespace('ns' . crc32($nsUri), $nsUri), $localPart);
     }
 }

@@ -702,6 +702,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
         }
 
         $data = [];
+        $keys = [];
         while (true) {
             $this->skip();
             $keyStr = $this->readQName();
@@ -710,7 +711,9 @@ class ProvNDeserializer implements ProvDeserializerInterface
             $this->expect('=');
 
             $value = $this->readAttrValue($nsManager);
-            $data[$key->getUri()][] = $value;
+            $uri = $key->getUri();
+            $data[$uri][] = $value;
+            $keys[$uri] ??= $key;
 
             $this->skip();
             if ($this->pos < $this->len && $this->input[$this->pos] === ']') {
@@ -720,7 +723,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
             $this->expect(',');
         }
 
-        return new Attributes($data);
+        return new Attributes($data, $keys);
     }
 
     /**
