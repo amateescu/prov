@@ -46,6 +46,8 @@ class ProvNSerializer implements ProvSerializerInterface
         public readonly bool $includeDefaultNamespace = true,
     ) {}
 
+    private ?PrefixMinter $minter = null;
+
     /**
      * {@inheritdoc}
      */
@@ -60,8 +62,26 @@ class ProvNSerializer implements ProvSerializerInterface
                 $nsManager->add($ns);
             }
         }
+        $minter = new PrefixMinter($nsManager);
+        $this->minter = $minter;
 
         $indent = $this->indentPrefix();
+
+        // The body is rendered before the prefix block so that namespaces minted
+        // for undeclared attribute keys can still be declared in the header.
+        $bodyLines = [];
+        foreach ($document->records as $record) {
+            $line = $this->serializeRecord($record, $nsManager);
+            if ($line !== null) {
+                $bodyLines[] = $indent . $line;
+            }
+        }
+
+        foreach ($document->bundles as $bundle) {
+            $bodyLines[] = '';
+            $this->serializeBundle($bundle, $bodyLines, $nsManager);
+        }
+
         $lines = [];
         $lines[] = 'document';
 
@@ -75,23 +95,16 @@ class ProvNSerializer implements ProvSerializerInterface
                 $lines[] = $indent . "prefix {$ns->prefix} <{$ns->uri}>";
             }
         }
+        foreach ($minter->getMintedNamespaces() as $ns) {
+            $this->assertSafeNamespace($ns);
+            $lines[] = $indent . "prefix {$ns->prefix} <{$ns->uri}>";
+        }
 
-        if ($document->namespaces !== []) {
+        if ($document->namespaces !== [] || $minter->getMintedNamespaces() !== []) {
             $lines[] = '';
         }
 
-        foreach ($document->records as $record) {
-            $line = $this->serializeRecord($record, $nsManager);
-            if ($line !== null) {
-                $lines[] = $indent . $line;
-            }
-        }
-
-        foreach ($document->bundles as $bundle) {
-            $lines[] = '';
-            $this->serializeBundle($bundle, $lines, $nsManager);
-        }
-
+        $lines = array_merge($lines, $bodyLines);
         $lines[] = 'endDocument';
 
         return implode("\n", $lines) . "\n";
@@ -550,7 +563,9 @@ class ProvNSerializer implements ProvSerializerInterface
 
         $pairs = [];
         foreach ($attributes->all() as $uri => $values) {
-            $key = $nsManager->uriToPrefixed($uri);
+            $key = $this->minter !== null
+                ? $this->minter->uriToPrefixed($uri, $nsManager)
+                : $nsManager->uriToPrefixed($uri);
             $this->assertSafeAttributeKey($key);
             foreach ($values as $value) {
                 $formattedValue = $this->formatAttributeValue($value);

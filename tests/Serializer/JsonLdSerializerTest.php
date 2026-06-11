@@ -50,15 +50,23 @@ final class JsonLdSerializerTest extends TestCase
 
     public function testContextIncludesNamespaces(): void
     {
-        $data = $this->serializeToArray($this->buildDoc());
+        $data = $this->serializeToArray($this->buildDoc()->entity('ex:e1'));
         $this->assertSame('http://example.org/', $data['@context']['ex']);
         $this->assertSame('http://www.w3.org/ns/prov#', $data['@context']['prov']);
+    }
+
+    public function testContextAlwaysIncludesProvAndXsd(): void
+    {
+        $data = $this->serializeToArray(new DocumentBuilder());
+        $this->assertSame('http://www.w3.org/ns/prov#', $data['@context']['prov']);
+        $this->assertSame('http://www.w3.org/2001/XMLSchema#', $data['@context']['xsd']);
     }
 
     public function testContextUsesVocabForDefault(): void
     {
         $builder = new DocumentBuilder();
         $builder->setDefaultNamespace(new ProvNamespace('default', 'http://default.org/'));
+        $builder->entity('e1');
         $data = $this->serializeToArray($builder);
         $this->assertSame('http://default.org/', $data['@context']['@vocab']);
     }

@@ -17,6 +17,26 @@ final class ProvNamespaceTest extends TestCase
         $this->assertSame('http://example.org/', $ns->uri);
     }
 
+    public function testEmptyPrefixIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('prefix cannot be empty');
+        new ProvNamespace('', 'http://example.org/');
+    }
+
+    public function testEmptyUriIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('URI cannot be empty');
+        new ProvNamespace('ex', '');
+    }
+
+    public function testBlankNodeSentinelNamespaceIsAllowed(): void
+    {
+        $ns = new ProvNamespace('_', '_:');
+        $this->assertSame('_:b1', $ns->qualifiedName('b1')->uri);
+    }
+
     public function testQualifiedNameFactory(): void
     {
         $ns = new ProvNamespace('ex', 'http://example.org/');

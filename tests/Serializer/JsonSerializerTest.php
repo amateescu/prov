@@ -56,7 +56,7 @@ final class JsonSerializerTest extends TestCase
 
     public function testSerializePrefixes(): void
     {
-        $doc = $this->buildDoc()->build();
+        $doc = $this->buildDoc()->entity('ex:e1', ['prov:label' => 'labelled'])->build();
         $data = json_decode($this->serializer->serialize($doc), true);
 
         $this->assertSame('http://example.org/', $data['prefix']['ex']);

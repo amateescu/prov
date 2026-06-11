@@ -26,6 +26,10 @@ class BundleBuilder extends RecordBuilder
     /**
      * Finalizes the builder and returns the immutable Bundle.
      *
+     * The bundle's own namespace declarations are pruned to the ones its
+     * records actually reference, unless `keepUnusedNamespaces()` was called;
+     * declarations inherited from the parent document are unaffected.
+     *
      * @throws \LogicException
      *   On a second call: builders are single-use.
      */
@@ -33,10 +37,13 @@ class BundleBuilder extends RecordBuilder
     {
         $this->markBuilt();
 
-        return new Bundle(
-            identifier: $this->identifier,
-            records: $this->records,
-            namespaces: $this->namespaceManager->getRegisteredNamespaces(),
-        );
+        $namespaces = $this->namespaceManager->getRegisteredNamespaces();
+        if (!$this->keepUnusedNamespaces) {
+            $usedUris = self::collectReferencedUris($this->records);
+            $usedUris[$this->identifier->getUri()] = true;
+            $namespaces = self::pruneNamespaces($namespaces, $usedUris);
+        }
+
+        return new Bundle(identifier: $this->identifier, records: $this->records, namespaces: $namespaces);
     }
 }

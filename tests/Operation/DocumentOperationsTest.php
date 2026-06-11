@@ -201,8 +201,8 @@ final class DocumentOperationsTest extends TestCase
 
     public function testMergeDeduplicatesNamespaces(): void
     {
-        $a = $this->buildDoc();
-        $b = $this->buildDoc();
+        $a = $this->buildDoc()->keepUnusedNamespaces();
+        $b = $this->buildDoc()->keepUnusedNamespaces();
 
         $merged = DocumentOperations::merge($a->build(), $b->build());
         $exCount = count(array_filter($merged->namespaces, static fn($ns) => $ns->uri === 'http://example.org/'));
@@ -225,9 +225,11 @@ final class DocumentOperationsTest extends TestCase
     {
         $docA = new DocumentBuilder()
             ->addNamespace(new ProvNamespace('ex', 'http://example.org/a/'))
+            ->entity('ex:e1')
             ->build();
         $docB = new DocumentBuilder()
             ->addNamespace(new ProvNamespace('ex', 'http://example.org/b/'))
+            ->entity('ex:e1')
             ->build();
 
         $this->expectException(NamespaceException::class);
@@ -240,11 +242,11 @@ final class DocumentOperationsTest extends TestCase
         $bundleId = $this->ex->qualifiedName('b1');
 
         $builderA = new DocumentBuilder();
-        $builderA->bundle($bundleId)->addNamespace(new ProvNamespace('foo', 'http://example.org/a/'));
+        $builderA->bundle($bundleId)->addNamespace(new ProvNamespace('foo', 'http://example.org/a/'))->entity('foo:e1');
         $docA = $builderA->build();
 
         $builderB = new DocumentBuilder();
-        $builderB->bundle($bundleId)->addNamespace(new ProvNamespace('foo', 'http://example.org/b/'));
+        $builderB->bundle($bundleId)->addNamespace(new ProvNamespace('foo', 'http://example.org/b/'))->entity('foo:e1');
         $docB = $builderB->build();
 
         $this->expectException(NamespaceException::class);

@@ -163,6 +163,9 @@ class ProvNDeserializer implements ProvDeserializerInterface
         $prefix = $this->readWord();
         $this->skip();
         $uri = $this->readIri();
+        if ($prefix === '' || $uri === '') {
+            throw $this->err('Malformed prefix declaration.');
+        }
 
         $nsManager->add(new ProvNamespace($prefix, $uri));
     }
@@ -171,6 +174,9 @@ class ProvNDeserializer implements ProvDeserializerInterface
     {
         $this->skip();
         $uri = $this->readIri();
+        if ($uri === '') {
+            throw $this->err('Malformed default namespace declaration.');
+        }
 
         $nsManager->setDefault(new ProvNamespace('default', $uri));
     }

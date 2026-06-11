@@ -94,6 +94,8 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         public readonly bool $prettyPrint = true,
     ) {}
 
+    private ?PrefixMinter $minter = null;
+
     // ============================================================
     // Serialization
     // ============================================================
@@ -131,6 +133,9 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:' . $ns->prefix, $ns->uri);
             $nsManager->add($ns);
         }
+        // Minted namespaces need no root declaration: createElementNS declares
+        // them on the elements that use them.
+        $this->minter = new PrefixMinter($nsManager);
 
         foreach ($document->records as $record) {
             $this->serializeRecord($dom, $root, $record, $nsManager);
@@ -367,7 +372,9 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         NamespaceManager $nsManager,
     ): void {
         foreach ($attributes->all() as $uri => $values) {
-            $prefixed = $nsManager->uriToPrefixed($uri);
+            $prefixed = $this->minter !== null
+                ? $this->minter->uriToPrefixed($uri, $nsManager)
+                : $nsManager->uriToPrefixed($uri);
             foreach ($values as $value) {
                 $this->serializeAttributeValue($dom, $parent, $prefixed, $value, $nsManager);
             }
@@ -935,9 +942,24 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                 $localName = substr($localName, 1);
             }
             $prefix = $child->prefix;
-            $keyStr = $prefix !== '' ? $prefix . ':' . $localName : $localName;
+            $nsUri = $child->namespaceURI;
 
-            $key = $nsManager->resolve($keyStr);
+            // Prefer the element's own namespace URI: DOM applies XML scoping
+            // rules, so declarations local to the element (not just the root)
+            // resolve correctly. Reuse the declared ProvNamespace instance when
+            // the prefix is registered with the same URI; fall back to prefix
+            // resolution for non-namespaced elements.
+            if ($nsUri !== null && $nsUri !== '') {
+                $managerPrefix = $prefix !== '' ? $prefix : 'default';
+                $declared = $nsManager->getNamespace($managerPrefix);
+                $key =
+                    $declared !== null && $declared->uri === $nsUri
+                        ? $declared->qualifiedName($localName)
+                        : new ProvNamespace($managerPrefix, $nsUri)->qualifiedName($localName);
+            } else {
+                $keyStr = $prefix !== '' ? $prefix . ':' . $localName : $localName;
+                $key = $nsManager->resolve($keyStr);
+            }
             $value = $this->deserializeAttrValue($child, $nsManager);
 
             $uri = $key->getUri();

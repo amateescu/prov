@@ -9,16 +9,35 @@ namespace Prov\Identifier;
  * to a full URI. Callers typically obtain one via
  * `NamespaceManager::resolve()` or `ProvNamespace::qualifiedName()` rather
  * than constructing directly, so prefix bindings stay consistent.
+ *
+ * The full URI is the identity of a QualifiedName: two instances with the
+ * same URI but different prefixes name the same thing and serialize to the
+ * same resource, while PHP's `==` compares the prefix too. Compare via
+ * `getUri()` rather than object comparison.
  */
 readonly class QualifiedName implements \Stringable
 {
     public string $uri;
     private string $stringForm;
 
+    /**
+     * @param \Prov\Identifier\ProvNamespace $namespace
+     *   The namespace the identifier lives in.
+     * @param string $localPart
+     *   The name within the namespace. Must be non-empty.
+     *
+     * @throws \InvalidArgumentException
+     *   When the local part is empty.
+     */
     public function __construct(
         public ProvNamespace $namespace,
         public string $localPart,
     ) {
+        if ($this->localPart === '') {
+            throw new \InvalidArgumentException(
+                "Qualified name local part cannot be empty (namespace '{$this->namespace->uri}').",
+            );
+        }
         $this->uri = $this->namespace->uri . $this->localPart;
         $this->stringForm = $this->namespace->prefix . ':' . $this->localPart;
     }

@@ -213,6 +213,15 @@ final class NamespaceManagerTest extends TestCase
         $this->assertSame('entity1', $qn->localPart);
     }
 
+    public function testResolveUnmatchedFullUriReportsUriNotPrefix(): void
+    {
+        $manager = new NamespaceManager();
+
+        $this->expectException(NamespaceException::class);
+        $this->expectExceptionMessage("No registered namespace matches URI 'http://unknown.example/foo'.");
+        $manager->resolve('http://unknown.example/foo');
+    }
+
     public function testResolveUriViaParent(): void
     {
         $parent = new NamespaceManager();

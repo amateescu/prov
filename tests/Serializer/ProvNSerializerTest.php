@@ -40,7 +40,7 @@ final class ProvNSerializerTest extends TestCase
 
     public function testNamespaceDeclarations(): void
     {
-        $doc = $this->buildDoc()->build();
+        $doc = $this->buildDoc()->entity('ex:e1', ['prov:label' => 'labelled'])->build();
         $output = $this->serializer->serialize($doc);
 
         $this->assertStringContainsString('prefix ex <http://example.org/>', $output);
@@ -51,6 +51,7 @@ final class ProvNSerializerTest extends TestCase
     {
         $builder = new DocumentBuilder();
         $builder->setDefaultNamespace(new ProvNamespace('default', 'http://default.org/'));
+        $builder->entity('e1');
         $output = $this->serializer->serialize($builder->build());
 
         $this->assertStringContainsString('default <http://default.org/>', $output);

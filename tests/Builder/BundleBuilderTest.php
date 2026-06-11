@@ -81,12 +81,26 @@ final class BundleBuilderTest extends TestCase
     {
         $builder = new BundleBuilder($this->ex->qualifiedName('b1'));
         $builder->addNamespace($this->ex);
+        $builder->entity('ex:e1', ['prov:label' => 'used']);
 
         $bundle = $builder->build();
         $prefixes = array_map(static fn(ProvNamespace $ns) => $ns->prefix, $bundle->namespaces);
 
         $this->assertContains('ex', $prefixes);
         $this->assertContains('prov', $prefixes);
+    }
+
+    public function testBuildPrunesUnusedNamespaces(): void
+    {
+        $builder = new BundleBuilder($this->ex->qualifiedName('b1'));
+        $builder->addNamespace($this->ex);
+        $builder->addNamespace(new ProvNamespace('unused', 'http://unused.example/'));
+
+        $bundle = $builder->build();
+        $prefixes = array_map(static fn(ProvNamespace $ns) => $ns->prefix, $bundle->namespaces);
+
+        // The bundle identifier keeps `ex` alive; nothing references the others.
+        $this->assertSame(['ex'], $prefixes);
     }
 
     public function testSetDefaultNamespace(): void

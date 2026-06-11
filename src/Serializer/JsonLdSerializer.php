@@ -41,6 +41,8 @@ class JsonLdSerializer implements ProvSerializerInterface
         public readonly bool $prettyPrint = false,
     ) {}
 
+    private ?PrefixMinter $minter = null;
+
     /**
      * {@inheritdoc}
      */
@@ -55,6 +57,8 @@ class JsonLdSerializer implements ProvSerializerInterface
                 $nsManager->add($ns);
             }
         }
+        $minter = new PrefixMinter($nsManager);
+        $this->minter = $minter;
 
         $context = $this->buildContext($document);
         $graph = $this->buildGraph($document->records, $nsManager);
@@ -77,6 +81,10 @@ class JsonLdSerializer implements ProvSerializerInterface
             $graph[] = $bundleNode;
         }
 
+        foreach ($minter->getMintedNamespaces() as $ns) {
+            $context[$ns->prefix] = $ns->uri;
+        }
+
         $output = ['@context' => $context];
         if (count($graph) === 1 && !isset($graph[0]['@graph'])) {
             $output = array_merge($output, $graph[0]);
@@ -97,13 +105,19 @@ class JsonLdSerializer implements ProvSerializerInterface
 
     /**
      * Builds the JSON-LD `@context` block from the document's namespace
-     * declarations. The library's "default" prefix maps to `@vocab`.
+     * declarations. The library's "default" prefix maps to `@vocab`. The prov
+     * and xsd namespaces are always included: the serializer emits prov:* and
+     * xsd:* terms structurally, and unlike the library's deserializers, an
+     * external JSON-LD consumer has no built-in bindings for them.
      *
      * @return array<string, string>
      */
     private function buildContext(Document $document): array
     {
-        $context = [];
+        $context = [
+            'prov' => 'http://www.w3.org/ns/prov#',
+            'xsd' => 'http://www.w3.org/2001/XMLSchema#',
+        ];
         foreach ($document->namespaces as $ns) {
             if ($ns->prefix === 'default') {
                 $context['@vocab'] = $ns->uri;
@@ -590,7 +604,9 @@ class JsonLdSerializer implements ProvSerializerInterface
         }
 
         foreach ($attributes->all() as $uri => $values) {
-            $key = $nsManager->uriToPrefixed($uri);
+            $key = $this->minter !== null
+                ? $this->minter->uriToPrefixed($uri, $nsManager)
+                : $nsManager->uriToPrefixed($uri);
             foreach ($values as $value) {
                 $this->appendProperty($node, $key, $this->serializeValue($value));
             }
