@@ -12,6 +12,7 @@ use Prov\Bundle;
 use Prov\Document;
 use Prov\Entity;
 use Prov\Exception\DeserializationException;
+use Prov\Exception\NamespaceException;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
@@ -59,6 +60,9 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
     private int $blankNodeCounter = 0;
 
+    /** @var array<string, true> Blank labels the document already uses. */
+    private array $usedBlankLabels = [];
+
     private ?PrefixMinter $minter = null;
 
     public function __construct(
@@ -75,6 +79,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     {
         $this->blankNodes = new \WeakMap();
         $this->blankNodeCounter = 0;
+        $this->collectUsedBlankLabels($document);
 
         $nsManager = new NamespaceManager();
         foreach ($document->namespaces as $ns) {
@@ -130,6 +135,68 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     }
 
     /**
+     * Mints a serialization-only blank id, skipping every label the document
+     * itself uses: a collision would alias the minted record with an existing
+     * blank node and fabricate an identity link on deserialization.
+     */
+    private function mintBlankLabel(): string
+    {
+        do {
+            $label = '_:b' . ++$this->blankNodeCounter;
+        } while (isset($this->usedBlankLabels[$label]));
+        return $label;
+    }
+
+    private function collectUsedBlankLabels(Document $document): void
+    {
+        $labels = [];
+        $records = $document->records;
+        foreach ($document->bundles as $bundle) {
+            $records = array_merge($records, $bundle->records);
+        }
+        foreach ($records as $record) {
+            $id = $record->identifier;
+            if ($id !== null && str_starts_with($id->getUri(), '_:')) {
+                $labels[$id->getUri()] = true;
+            }
+            if ($record instanceof ProvRelation) {
+                foreach (RelationMetadata::extractFormals($record) as $value) {
+                    if ($value instanceof QualifiedName && str_starts_with($value->getUri(), '_:')) {
+                        $labels[$value->getUri()] = true;
+                    } elseif (is_array($value)) {
+                        $this->collectBlankDictionaryLabels($value, $labels);
+                    }
+                }
+            }
+            foreach ($record->attributes->all() as $values) {
+                foreach ($values as $value) {
+                    if ($value instanceof QualifiedName && str_starts_with($value->getUri(), '_:')) {
+                        $labels[$value->getUri()] = true;
+                    }
+                }
+            }
+        }
+        $this->usedBlankLabels = $labels;
+    }
+
+    /**
+     * @param array<array-key, mixed> $items
+     * @param array<string, true> $labels
+     */
+    private function collectBlankDictionaryLabels(array $items, array &$labels): void
+    {
+        foreach ($items as $item) {
+            if (
+                $item instanceof DictionaryEntry
+                && $item->entity !== null
+                && str_starts_with($item->entity->getUri(), '_:')
+            ) {
+                $labels[$item->entity->getUri()] = true;
+            }
+        }
+    }
+
+    /**
      * {@inheritdoc}
      */
     public function deserialize(string $data): Document
@@ -139,6 +206,22 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             throw new DeserializationException('Invalid PROV-JSON: could not decode JSON.');
         }
 
+        try {
+            return $this->deserializeDocument($json);
+        } catch (NamespaceException|\InvalidArgumentException $e) {
+            // An unresolvable or invalid identifier (undeclared prefix, missing
+            // default namespace, conflicting declarations, empty local part)
+            // means the input is malformed; surface it under the
+            // deserialization contract.
+            throw new DeserializationException('Invalid PROV-JSON: ' . $e->getMessage(), previous: $e);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $json
+     */
+    private function deserializeDocument(array $json): Document
+    {
         $nsManager = new NamespaceManager();
         $prefixes = $json['prefix'] ?? [];
         foreach ($prefixes as $prefix => $uri) {
@@ -242,7 +325,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     ): void {
         $id = $record->identifier !== null
             ? (string) $record->identifier
-            : ($this->blankNodes[$record] ??= '_:b' . ++$this->blankNodeCounter);
+            : ($this->blankNodes[$record] ??= $this->mintBlankLabel());
         $attrs = $record->attributes->isEmpty()
             ? new \stdClass()
             : ($this->serializeAttributes($record->attributes, $nsManager) ?: new \stdClass());
@@ -256,7 +339,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     {
         $id = $record->identifier !== null
             ? (string) $record->identifier
-            : ($this->blankNodes[$record] ??= '_:b' . ++$this->blankNodeCounter);
+            : ($this->blankNodes[$record] ??= $this->mintBlankLabel());
         $attrs = $record->attributes->isEmpty() ? [] : $this->serializeAttributes($record->attributes, $nsManager);
 
         if ($record->startTime !== null) {
@@ -286,7 +369,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
         $id = $record->identifier !== null
             ? (string) $record->identifier
-            : ($this->blankNodes[$record] ??= '_:b' . ++$this->blankNodeCounter);
+            : ($this->blankNodes[$record] ??= $this->mintBlankLabel());
         $this->appendToSection($output, $relationKey, $id, $attrs ?: new \stdClass());
     }
 

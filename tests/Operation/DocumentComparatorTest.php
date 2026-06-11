@@ -242,4 +242,102 @@ final class DocumentComparatorTest extends TestCase
 
         $this->assertTrue(DocumentComparator::equals($a->build(), $b->build()));
     }
+
+    /**
+     * Builds the same linked-blank structure with caller-chosen blank labels.
+     */
+    private function docWithBlankLabels(string $entityLabel, string $agentLabel): \Prov\Document
+    {
+        $blank = new ProvNamespace('_', '_:');
+        $b = $this->buildDoc();
+        $b->entity($blank->qualifiedName($entityLabel));
+        $b->agent($blank->qualifiedName($agentLabel));
+        $b->wasAttributedTo(entity: $blank->qualifiedName($entityLabel), agent: $blank->qualifiedName($agentLabel));
+        return $b->build();
+    }
+
+    public function testBlankNodeRenamingComparesEqual(): void
+    {
+        $a = $this->docWithBlankLabels('b1', 'b2');
+        $b = $this->docWithBlankLabels('x7', 'y9');
+
+        $this->assertTrue(DocumentComparator::equals($a, $b));
+    }
+
+    public function testSwappedBlankRolesAreNotEqual(): void
+    {
+        // In $b the attribution points the other way around, so no renaming
+        // of blank labels can make the two documents coincide.
+        $blank = new ProvNamespace('_', '_:');
+        $a = $this->docWithBlankLabels('b1', 'b2');
+
+        $b = $this->buildDoc();
+        $b->entity($blank->qualifiedName('b1'));
+        $b->agent($blank->qualifiedName('b2'));
+        $b->wasAttributedTo(entity: $blank->qualifiedName('b2'), agent: $blank->qualifiedName('b1'));
+
+        $this->assertFalse(DocumentComparator::equals($a, $b->build()));
+    }
+
+    public function testDanglingBlankReferenceIsNotEqualToLinkedOne(): void
+    {
+        $blank = new ProvNamespace('_', '_:');
+        $a = $this->buildDoc();
+        $a->entity($blank->qualifiedName('b1'));
+        $a->wasAttributedTo(entity: $blank->qualifiedName('b1'), agent: 'ex:alice');
+
+        // Same shape, but the attribution references a blank with no entity record.
+        $b = $this->buildDoc();
+        $b->entity($blank->qualifiedName('b1'));
+        $b->wasAttributedTo(entity: $blank->qualifiedName('b2'), agent: 'ex:alice');
+
+        $this->assertFalse(DocumentComparator::equals($a->build(), $b->build()));
+    }
+
+    public function testDistinctAnonymousRecordsCountAsMultiset(): void
+    {
+        $a = $this->buildDoc();
+        $a->entity(null, ['ex:tag' => 'same']);
+        $a->entity(null, ['ex:tag' => 'same']);
+        $docA = $a->build();
+
+        $b = $this->buildDoc();
+        $b->entity(null, ['ex:tag' => 'same']);
+
+        $this->assertFalse(DocumentComparator::equals($docA, $b->build()));
+
+        $c = $this->buildDoc();
+        $c->entity(null, ['ex:tag' => 'same']);
+        $c->entity(null, ['ex:tag' => 'same']);
+
+        $this->assertTrue(DocumentComparator::equals($docA, $c->build()));
+    }
+
+    public function testAnonymousMultiplicityDiffMessageReportsCounts(): void
+    {
+        $a = $this->buildDoc();
+        $a->entity(null, ['ex:tag' => 'same']);
+        $a->entity(null, ['ex:tag' => 'same']);
+
+        $b = $this->buildDoc();
+        $b->entity(null, ['ex:tag' => 'same']);
+
+        $diff = DocumentComparator::diff($a->build(), $b->build());
+        $this->assertCount(1, $diff);
+        $this->assertStringContainsString('appears 2 times in first but 1 times in second', $diff[0]);
+    }
+
+    public function testBlankAttributeValueComparesUpToRenaming(): void
+    {
+        $blank = new ProvNamespace('_', '_:');
+        $a = $this->buildDoc();
+        $a->entity('ex:e1', ['ex:ref' => $blank->qualifiedName('b1')]);
+        $a->entity($blank->qualifiedName('b1'));
+
+        $b = $this->buildDoc();
+        $b->entity('ex:e1', ['ex:ref' => $blank->qualifiedName('z3')]);
+        $b->entity($blank->qualifiedName('z3'));
+
+        $this->assertTrue(DocumentComparator::equals($a->build(), $b->build()));
+    }
 }

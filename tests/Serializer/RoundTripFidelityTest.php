@@ -101,6 +101,61 @@ final class RoundTripFidelityTest extends TestCase
         }
     }
 
+    public function testMentionRoundTrips(): void
+    {
+        foreach (self::roundTripFormats() as $format) {
+            $builder = new DocumentBuilder();
+            $builder->namespace('ex', 'http://example.org/');
+            $builder->entity('ex:specific');
+            $builder->mentionOf(specificEntity: 'ex:specific', generalEntity: 'ex:general', bundle: 'ex:b1');
+            $builder->withBundle('ex:b1', static fn($bb) => $bb->entity('ex:general'));
+            $document = $builder->build();
+
+            $roundTripped = Prov::deserialize(Prov::serialize($document, $format), $format);
+            $mentions = $roundTripped->getRecordsByType(\Prov\Relation\Mention::class);
+
+            $this->assertCount(1, $mentions, "Mention lost in {$format->name}.");
+            $this->assertSame('http://example.org/specific', $mentions[0]->specificEntity?->getUri());
+            $this->assertSame('http://example.org/general', $mentions[0]->generalEntity?->getUri());
+            $this->assertSame('http://example.org/b1', $mentions[0]->bundle?->getUri());
+        }
+    }
+
+    public function testUnicodeValuesRoundTripVerbatim(): void
+    {
+        $values = [
+            'right quotation' => "it\u{2019}s a test",
+            'chinese' => "\u{4e16}\u{754c}",
+            'emoji' => "\u{1F600}",
+            'arabic' => "\u{0645}\u{0631}\u{062D}\u{0628}\u{0627}",
+            'mixed controls' => "line1\nline2\ttabbed \"quoted\" backslash\\end",
+        ];
+
+        foreach (self::roundTripFormats() as $format) {
+            $builder = new DocumentBuilder();
+            $builder->namespace('ex', 'http://example.org/');
+            foreach (array_values($values) as $i => $value) {
+                $builder->entity('ex:e' . $i, ['ex:label' => Literal::string($value)]);
+            }
+            $document = $builder->build();
+
+            $roundTripped = Prov::deserialize(Prov::serialize($document, $format), $format);
+
+            foreach (array_values($values) as $i => $value) {
+                $entity = $roundTripped->entities[$i];
+                $literals = $entity->attributes->getLiterals(new \Prov\Identifier\ProvNamespace(
+                    'ex',
+                    'http://example.org/',
+                )->qualifiedName('label'));
+                $this->assertSame(
+                    $value,
+                    $literals[0]->value ?? null,
+                    sprintf('Value %s not preserved verbatim in %s.', array_keys($values)[$i], $format->name),
+                );
+            }
+        }
+    }
+
     public function testLargeIntegerLiteralIsNotClampedInProvN(): void
     {
         $provn = 'document prefix ex <http://example.org/> entity(ex:e, [ex:v = 99999999999999999999]) endDocument';

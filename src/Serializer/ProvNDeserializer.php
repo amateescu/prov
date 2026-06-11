@@ -12,6 +12,7 @@ use Prov\Bundle;
 use Prov\Document;
 use Prov\Entity;
 use Prov\Exception\DeserializationException;
+use Prov\Exception\NamespaceException;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
@@ -61,7 +62,14 @@ class ProvNDeserializer implements ProvDeserializerInterface
         $records = [];
         $bundles = [];
 
-        $this->parseBody($nsManager, $records, $bundles);
+        try {
+            $this->parseBody($nsManager, $records, $bundles);
+        } catch (NamespaceException|\InvalidArgumentException $e) {
+            // An unresolvable or invalid identifier (undeclared prefix, missing
+            // default namespace, empty local part) means the input is
+            // malformed; surface it under the deserialization contract.
+            throw $this->err($e->getMessage());
+        }
         assert(is_array($bundles));
 
         $this->keyword('endDocument');
@@ -418,13 +426,31 @@ class ProvNDeserializer implements ProvDeserializerInterface
 
         if ($ch >= '0' && $ch <= '9') {
             $val = $this->readUntilDelim();
-            if (strlen($val) >= 5 && $val[4] === '-' && preg_match('/^\d{4}-\d{2}-\d{2}T/', $val)) {
-                return new \DateTimeImmutable($val);
+            if (strlen($val) >= 5 && $val[4] === '-' && preg_match('/^\d{4}-\d{2}-\d{2}/', $val) === 1) {
+                if (preg_match('/^\d{4}-\d{2}-\d{2}T/', $val) !== 1) {
+                    throw $this->err(
+                        "Expected an xsd:dateTime value with a time component (e.g. 2024-01-01T00:00:00) but found '{$val}'.",
+                    );
+                }
+                return $this->parseDateTime($val);
             }
             return $val;
         }
 
         return $this->readQName();
+    }
+
+    /**
+     * @throws \Prov\Exception\DeserializationException
+     *   When the lexical form is not a parseable datetime.
+     */
+    private function parseDateTime(string $val): \DateTimeImmutable
+    {
+        try {
+            return new \DateTimeImmutable($val);
+        } catch (\Exception) {
+            throw $this->err("Invalid xsd:dateTime value '{$val}'.");
+        }
     }
 
     /**
@@ -824,6 +850,9 @@ class ProvNDeserializer implements ProvDeserializerInterface
         if ($this->peek() === '@') {
             $this->advance();
             $lang = $this->readWord();
+            if ($lang === '') {
+                throw $this->err('Empty language tag.');
+            }
             return new Literal($str, languageTag: $lang);
         }
 
@@ -1004,7 +1033,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
             return null;
         }
         $val = $this->readUntilDelim();
-        return new \DateTimeImmutable($val);
+        return $this->parseDateTime($val);
     }
 
     private function isDashDelimiter(int $at): bool
