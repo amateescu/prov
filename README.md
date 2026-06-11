@@ -56,6 +56,8 @@ $parsed = Prov::deserialize($json, Format::Json);
 > $builder->wasGeneratedBy(entity: 'ex:article', activity: 'ex:writing');
 > $builder->used(activity: 'ex:writing', entity: 'ex:article');
 > ```
+>
+> The optional relation identifier is the *last* parameter of every relation method, so a positional call binds endpoints, never the id. Pass it by name: `wasGeneratedBy(entity: ..., activity: ..., identifier: 'ex:gen1')`.
 
 ## Format support
 
@@ -98,6 +100,24 @@ Coverage is partial: rules that need transitive graph reasoning over derivation 
 
 ## Builder tips
 
+**Attributes.** Pass attributes as an associative array: keys are resolved as namespace shorthands, and a list value adds one entry per element (that is how a repeated key is written, since PHP array keys are unique):
+
+```php
+$builder->entity('ex:e1', [
+    'prov:label' => 'My entity',
+    'prov:atLocation' => ['ex:rack1', 'ex:rack2'],  // two prov:atLocation values
+]);
+```
+
+String values stay string literals, with one exception: a `prov:type` value written as a registered shorthand (`'prov:type' => 'ex:Document'`) resolves to a qualified name, because `prov:type` values name types rather than carry text. For every other key, a string like `'workspace:stage'` is stored verbatim; pass a `QualifiedName` object when you mean a reference. `Prov\Attribute\AttributesBuilder` offers the same rules imperatively, useful when attributes accumulate across code paths:
+
+```php
+$attrs = new AttributesBuilder($namespaceManager)
+    ->add('prov:type', 'ex:Document')
+    ->addAll('prov:atLocation', $locations)
+    ->build();
+```
+
 **Blank nodes (anonymous records):**
 
 ```php
@@ -106,7 +126,7 @@ $builder->entity($e);
 $builder->wasGeneratedBy(entity: $e, activity: 'ex:writing');
 ```
 
-**Bundles:**
+**Bundles.** `withBundle()` is the recommended form: it builds the bundle eagerly, inline, without breaking the fluent chain:
 
 ```php
 $builder
@@ -116,6 +136,8 @@ $builder
         ->wasGeneratedBy(entity: 'ex:e2', activity: 'ex:a1'))
     ->build();
 ```
+
+Two alternatives exist for other flows: `bundle()` returns a detached `BundleBuilder` that you drive directly and that is built lazily when the document's `build()` runs, and `addBundle()` attaches an already-built `Bundle` (for example one obtained by deserializing).
 
 `DocumentBuilder::build()` and `BundleBuilder::build()` are single-use; a second call throws `LogicException`.
 

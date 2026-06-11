@@ -85,6 +85,22 @@ final class RoundTripFidelityTest extends TestCase
         }
     }
 
+    public function testAttributeKeysSurviveRoundTripAsQualifiedNames(): void
+    {
+        foreach (self::roundTripFormats() as $format) {
+            $builder = new DocumentBuilder();
+            $builder->namespace('ex', 'http://example.org/');
+            $builder->entity('ex:e', ['ex:tag' => 'a', 'prov:label' => 'b']);
+            $document = $builder->build();
+
+            $roundTripped = Prov::deserialize(Prov::serialize($document, $format), $format);
+            $keys = array_map(strval(...), $roundTripped->entities[0]->attributes->keys());
+            sort($keys);
+
+            $this->assertSame(['ex:tag', 'prov:label'], $keys, "Attribute keys lost in {$format->name}.");
+        }
+    }
+
     public function testLargeIntegerLiteralIsNotClampedInProvN(): void
     {
         $provn = 'document prefix ex <http://example.org/> entity(ex:e, [ex:v = 99999999999999999999]) endDocument';

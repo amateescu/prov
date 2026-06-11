@@ -943,8 +943,11 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         // Accumulate into the raw URI-keyed shape and build Attributes once. Using
         // with() here would copy the backing array on every value (O(n^2) per record).
         $data = [];
+        $keys = [];
         foreach ($attrs as $key => $value) {
-            $uri = $nsManager->resolve($key)->getUri();
+            $keyName = $nsManager->resolve($key);
+            $uri = $keyName->getUri();
+            $keys[$uri] ??= $keyName;
             if (is_array($value) && isset($value['$'])) {
                 $data[$uri][] = $this->deserializeTypedValue($value, $nsManager);
             } elseif (is_array($value) && !isset($value['$'])) {
@@ -960,7 +963,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             }
         }
 
-        return new Attributes($data);
+        return new Attributes($data, $keys);
     }
 
     private function deserializeTypedValue(array $value, NamespaceManager $nsManager): QualifiedName|Literal
