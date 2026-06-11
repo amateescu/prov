@@ -53,43 +53,8 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     private const string XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
     private const string XSD_NS = 'http://www.w3.org/2001/XMLSchema';
 
-    // PROV-XML element names match PROV-JSON keys; use shared constant.
-
-    /**
-     * Maps PROV-XML child element local names to relation formal attribute names.
-     *
-     * @var array<string, array<string, string>>
-     */
-    private const array FORMAL_CHILD_ELEMENTS = [
-        'wasGeneratedBy' => ['entity' => 'entity', 'activity' => 'activity', 'time' => 'time'],
-        'used' => ['activity' => 'activity', 'entity' => 'entity', 'time' => 'time'],
-        'wasInformedBy' => ['informed' => 'informed', 'informant' => 'informant'],
-        'wasStartedBy' => ['activity' => 'activity', 'trigger' => 'trigger', 'starter' => 'starter', 'time' => 'time'],
-        'wasEndedBy' => ['activity' => 'activity', 'trigger' => 'trigger', 'ender' => 'ender', 'time' => 'time'],
-        'wasInvalidatedBy' => ['entity' => 'entity', 'activity' => 'activity', 'time' => 'time'],
-        'wasDerivedFrom' => [
-            'generatedEntity' => 'generatedEntity',
-            'usedEntity' => 'usedEntity',
-            'activity' => 'activity',
-            'generation' => 'generation',
-            'usage' => 'usage',
-        ],
-        'wasAttributedTo' => ['entity' => 'entity', 'agent' => 'agent'],
-        'wasAssociatedWith' => ['activity' => 'activity', 'agent' => 'agent', 'plan' => 'plan'],
-        'actedOnBehalfOf' => ['delegate' => 'delegate', 'responsible' => 'responsible', 'activity' => 'activity'],
-        'wasInfluencedBy' => ['influencee' => 'influencee', 'influencer' => 'influencer'],
-        'specializationOf' => ['specificEntity' => 'specificEntity', 'generalEntity' => 'generalEntity'],
-        'alternateOf' => ['alternate1' => 'alternate1', 'alternate2' => 'alternate2'],
-        'hadMember' => ['collection' => 'collection', 'entity' => 'entity'],
-        'mentionOf' => ['specificEntity' => 'specificEntity', 'generalEntity' => 'generalEntity', 'bundle' => 'bundle'],
-        'hadDictionaryMember' => ['dictionary' => 'dictionary', 'keyEntityPair' => '_keyEntityPair'],
-        'derivedByInsertionFrom' => [
-            'newDictionary' => 'after',
-            'oldDictionary' => 'before',
-            'keyEntityPair' => '_keyEntityPair',
-        ],
-        'derivedByRemovalFrom' => ['newDictionary' => 'after', 'oldDictionary' => 'before', 'key' => '_key'],
-    ];
+    // PROV-XML element names match PROV-JSON keys, and the child element
+    // layout per relation comes from RelationMetadata::xmlChildElements().
 
     public function __construct(
         public readonly bool $prettyPrint = true,
@@ -330,26 +295,15 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     /**
      * Extracts the formal fields of a relation that render as child elements
      * in PROV-XML (QualifiedName references and DateTimeImmutable times),
-     * keyed by their XML element local name.
+     * keyed by their XML element local name. Read off the relation's fields
+     * directly to skip the extractFormals intermediate array.
      *
      * @return array<string, \Prov\Identifier\QualifiedName|\DateTimeImmutable|null>
      */
     private function getRefProperties(ProvRelation $record): array
     {
-        // Dictionary relations use different XML element names than property names.
-        if ($record instanceof DictionaryMembership) {
-            return ['dictionary' => $record->dictionary];
-        }
-        if ($record instanceof DictionaryInsertion) {
-            return ['newDictionary' => $record->after, 'oldDictionary' => $record->before];
-        }
-        if ($record instanceof DictionaryRemoval) {
-            return ['newDictionary' => $record->after, 'oldDictionary' => $record->before];
-        }
-
-        // For all other relations, property names match XML element names. Read the
-        // relation's fields directly to skip the extractFormals intermediate array.
         $meta = RelationMetadata::FORMALS[$record::class] ?? [];
+        $overrides = RelationMetadata::XML_FORMAL_OVERRIDES[$record::class] ?? [];
         $vars = get_object_vars($record);
 
         $result = [];
@@ -360,7 +314,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             // @mago-expect analysis:mixed-assignment
             $value = $vars[$prop] ?? null;
             if ($value === null || $value instanceof QualifiedName || $value instanceof \DateTimeImmutable) {
-                $result[$prop] = $value;
+                $result[$overrides[$prop] ?? $prop] = $value;
             }
         }
         return $result;
@@ -652,17 +606,6 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     }
 
     /**
-     * PROV-XML shortcut element names that desugar to a Derivation with a prov:type attribute.
-     *
-     * @var array<string, string>
-     */
-    private const array DERIVATION_SUBTYPE_ELEMENTS = [
-        'revision' => 'Revision',
-        'quotation' => 'Quotation',
-        'primarySource' => 'PrimarySource',
-    ];
-
-    /**
      * @param list<\Prov\Model\ProvRecord> $records
      */
     private function deserializeRelation(\DOMElement $el, NamespaceManager $nsManager, array &$records): void
@@ -671,13 +614,23 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         if ($relName === null) {
             return;
         }
-        $injectedSubtype = self::DERIVATION_SUBTYPE_ELEMENTS[$relName] ?? null;
+        // PROV-XML names the Derivation subtype shortcut elements after their
+        // prov:type local name, lowercased (revision, quotation, primarySource).
+        /** @var array<string, string>|null $subtypeElements */
+        static $subtypeElements = null;
+        if ($subtypeElements === null) {
+            $subtypeElements = [];
+            foreach (RelationMetadata::DERIVATION_SUBTYPES as $subtype) {
+                $subtypeElements[lcfirst($subtype)] = $subtype;
+            }
+        }
+        $injectedSubtype = $subtypeElements[$relName] ?? null;
         if ($injectedSubtype !== null) {
             $relName = 'wasDerivedFrom';
         }
         $idStr = $this->resolveProvId($el, $nsManager);
         $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
-        $formalMap = self::FORMAL_CHILD_ELEMENTS[$relName] ?? [];
+        $formalMap = RelationMetadata::xmlChildElements()[$relName] ?? [];
 
         /** @var array<string, \Prov\Identifier\QualifiedName|\DateTimeImmutable> $formals */
         $formals = [];

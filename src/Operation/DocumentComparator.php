@@ -193,14 +193,14 @@ final class DocumentComparator
     {
         $out = [];
         $id = $record->identifier;
-        if ($id !== null && str_starts_with($id->getUri(), '_:')) {
+        if ($id !== null && $id->isBlank()) {
             $out[] = ['id', $id->getUri()];
         }
 
         if ($record instanceof ProvRelation) {
             // @mago-expect analysis:mixed-assignment
             foreach (RelationMetadata::extractFormals($record) as $prop => $value) {
-                if ($value instanceof QualifiedName && str_starts_with($value->getUri(), '_:')) {
+                if ($value instanceof QualifiedName && $value->isBlank()) {
                     $out[] = [$prop, $value->getUri()];
                 } elseif (is_array($value)) {
                     // @mago-expect analysis:mixed-assignment
@@ -208,7 +208,7 @@ final class DocumentComparator
                         if (
                             $item instanceof \Prov\Relation\Dictionary\DictionaryEntry
                             && $item->entity !== null
-                            && str_starts_with($item->entity->getUri(), '_:')
+                            && $item->entity->isBlank()
                         ) {
                             $out[] = ['dict', $item->entity->getUri()];
                         }
@@ -219,7 +219,7 @@ final class DocumentComparator
 
         foreach ($record->attributes->all() as $keyUri => $values) {
             foreach ($values as $value) {
-                if ($value instanceof QualifiedName && str_starts_with($value->getUri(), '_:')) {
+                if ($value instanceof QualifiedName && $value->isBlank()) {
                     $out[] = ['attr:' . $keyUri, $value->getUri()];
                 }
             }
@@ -245,7 +245,7 @@ final class DocumentComparator
         // Blank node identifiers (null, or the "_:" sentinel) normalize to empty, so a
         // blank record signs the same regardless of how its anonymity is represented.
         $id = $record->identifier;
-        $idSig = $id === null || str_starts_with($id->getUri(), '_:') ? '' : $id->getUri();
+        $idSig = $id === null || $id->isBlank() ? '' : $id->getUri();
 
         // json_encode gives an unambiguous, injection-proof signature in one pass: a crafted
         // attribute value cannot forge a component boundary because every string is JSON-escaped.

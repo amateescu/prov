@@ -156,12 +156,12 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         }
         foreach ($records as $record) {
             $id = $record->identifier;
-            if ($id !== null && str_starts_with($id->getUri(), '_:')) {
+            if ($id !== null && $id->isBlank()) {
                 $labels[$id->getUri()] = true;
             }
             if ($record instanceof ProvRelation) {
                 foreach (RelationMetadata::extractFormals($record) as $value) {
-                    if ($value instanceof QualifiedName && str_starts_with($value->getUri(), '_:')) {
+                    if ($value instanceof QualifiedName && $value->isBlank()) {
                         $labels[$value->getUri()] = true;
                     } elseif (is_array($value)) {
                         $this->collectBlankDictionaryLabels($value, $labels);
@@ -170,7 +170,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             }
             foreach ($record->attributes->all() as $values) {
                 foreach ($values as $value) {
-                    if ($value instanceof QualifiedName && str_starts_with($value->getUri(), '_:')) {
+                    if ($value instanceof QualifiedName && $value->isBlank()) {
                         $labels[$value->getUri()] = true;
                     }
                 }
@@ -186,11 +186,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     private function collectBlankDictionaryLabels(array $items, array &$labels): void
     {
         foreach ($items as $item) {
-            if (
-                $item instanceof DictionaryEntry
-                && $item->entity !== null
-                && str_starts_with($item->entity->getUri(), '_:')
-            ) {
+            if ($item instanceof DictionaryEntry && $item->entity !== null && $item->entity->isBlank()) {
                 $labels[$item->entity->getUri()] = true;
             }
         }

@@ -97,6 +97,177 @@ final class RelationMetadata
     ];
 
     /**
+     * Maps relation class names to their PROV-JSONLD (PROV-O) encoding:
+     *  - type: the @type of the qualified node (null for relations PROV-O
+     *    models as a plain object property, with no qualified form).
+     *  - qualifiedProperty: the property linking the subject to the qualified
+     *    node (null when type is null).
+     *  - shortcutProperty: the binary object-property form.
+     *  - properties: JSON-LD property per non-subject formal, in emission
+     *    order; the first entry is the shortcut form's object.
+     *
+     * The subject is always the relation's first formal property. Dictionary
+     * extension relations have no PROV-O shortcut encoding and are absent.
+     *
+     * @var array<class-string<\Prov\Model\ProvRelation>, array{
+     *   type: ?string,
+     *   qualifiedProperty: ?string,
+     *   shortcutProperty: string,
+     *   properties: array<string, string>,
+     * }>
+     */
+    public const array JSONLD = [
+        Generation::class => [
+            'type' => 'prov:Generation',
+            'qualifiedProperty' => 'prov:qualifiedGeneration',
+            'shortcutProperty' => 'prov:wasGeneratedBy',
+            'properties' => ['activity' => 'prov:activity', 'time' => 'prov:atTime'],
+        ],
+        Usage::class => [
+            'type' => 'prov:Usage',
+            'qualifiedProperty' => 'prov:qualifiedUsage',
+            'shortcutProperty' => 'prov:used',
+            'properties' => ['entity' => 'prov:entity', 'time' => 'prov:atTime'],
+        ],
+        Communication::class => [
+            'type' => 'prov:Communication',
+            'qualifiedProperty' => 'prov:qualifiedCommunication',
+            'shortcutProperty' => 'prov:wasInformedBy',
+            'properties' => ['informant' => 'prov:activity'],
+        ],
+        Start::class => [
+            'type' => 'prov:Start',
+            'qualifiedProperty' => 'prov:qualifiedStart',
+            'shortcutProperty' => 'prov:wasStartedBy',
+            'properties' => ['trigger' => 'prov:entity', 'starter' => 'prov:hadActivity', 'time' => 'prov:atTime'],
+        ],
+        End::class => [
+            'type' => 'prov:End',
+            'qualifiedProperty' => 'prov:qualifiedEnd',
+            'shortcutProperty' => 'prov:wasEndedBy',
+            'properties' => ['trigger' => 'prov:entity', 'ender' => 'prov:hadActivity', 'time' => 'prov:atTime'],
+        ],
+        Invalidation::class => [
+            'type' => 'prov:Invalidation',
+            'qualifiedProperty' => 'prov:qualifiedInvalidation',
+            'shortcutProperty' => 'prov:wasInvalidatedBy',
+            'properties' => ['activity' => 'prov:activity', 'time' => 'prov:atTime'],
+        ],
+        Derivation::class => [
+            'type' => 'prov:Derivation',
+            'qualifiedProperty' => 'prov:qualifiedDerivation',
+            'shortcutProperty' => 'prov:wasDerivedFrom',
+            'properties' => [
+                'usedEntity' => 'prov:entity',
+                'activity' => 'prov:hadActivity',
+                'generation' => 'prov:hadGeneration',
+                'usage' => 'prov:hadUsage',
+            ],
+        ],
+        Attribution::class => [
+            'type' => 'prov:Attribution',
+            'qualifiedProperty' => 'prov:qualifiedAttribution',
+            'shortcutProperty' => 'prov:wasAttributedTo',
+            'properties' => ['agent' => 'prov:agent'],
+        ],
+        Association::class => [
+            'type' => 'prov:Association',
+            'qualifiedProperty' => 'prov:qualifiedAssociation',
+            'shortcutProperty' => 'prov:wasAssociatedWith',
+            'properties' => ['agent' => 'prov:agent', 'plan' => 'prov:hadPlan'],
+        ],
+        Delegation::class => [
+            'type' => 'prov:Delegation',
+            'qualifiedProperty' => 'prov:qualifiedDelegation',
+            'shortcutProperty' => 'prov:actedOnBehalfOf',
+            'properties' => ['responsible' => 'prov:agent', 'activity' => 'prov:hadActivity'],
+        ],
+        Influence::class => [
+            'type' => 'prov:Influence',
+            'qualifiedProperty' => 'prov:qualifiedInfluence',
+            'shortcutProperty' => 'prov:wasInfluencedBy',
+            'properties' => ['influencer' => 'prov:influencer'],
+        ],
+        Specialization::class => [
+            'type' => null,
+            'qualifiedProperty' => null,
+            'shortcutProperty' => 'prov:specializationOf',
+            'properties' => ['generalEntity' => ''],
+        ],
+        Alternate::class => [
+            'type' => null,
+            'qualifiedProperty' => null,
+            'shortcutProperty' => 'prov:alternateOf',
+            'properties' => ['alternate2' => ''],
+        ],
+        Membership::class => [
+            'type' => null,
+            'qualifiedProperty' => null,
+            'shortcutProperty' => 'prov:hadMember',
+            'properties' => ['entity' => ''],
+        ],
+    ];
+
+    /**
+     * XML child element names for the formal properties whose element name
+     * differs from the property name (the PROV-DICT relations). Properties
+     * not listed here use their own name as the element name.
+     *
+     * @var array<class-string<\Prov\Model\ProvRelation>, array<string, string>>
+     */
+    public const array XML_FORMAL_OVERRIDES = [
+        DictionaryMembership::class => ['keyEntityPairs' => 'keyEntityPair'],
+        DictionaryInsertion::class => [
+            'after' => 'newDictionary',
+            'before' => 'oldDictionary',
+            'keyEntityPairs' => 'keyEntityPair',
+        ],
+        DictionaryRemoval::class => ['after' => 'newDictionary', 'before' => 'oldDictionary', 'removedKeys' => 'key'],
+    ];
+
+    /**
+     * PROV-N / PROV-XML shortcut forms that desugar to a Derivation carrying a
+     * `prov:type` attribute, keyed by the PROV-N keyword. The values are the
+     * local names of the prov:type QualifiedName and double as the PROV-XML
+     * shortcut element names (lowercased first letter).
+     *
+     * @var array<string, string>
+     */
+    public const array DERIVATION_SUBTYPES = [
+        'wasRevisionOf' => 'Revision',
+        'wasQuotedFrom' => 'Quotation',
+        'hadPrimarySource' => 'PrimarySource',
+    ];
+
+    /**
+     * Maps PROV-JSON relation keys to their PROV-XML child element layout:
+     * element local name => formal property name, with array-typed properties
+     * marked by an underscore-prefixed element name (their content needs
+     * per-relation handling).
+     *
+     * @return array<string, array<string, string>>
+     */
+    public static function xmlChildElements(): array
+    {
+        /** @var array<string, array<string, string>>|null $map */
+        static $map = null;
+        if ($map !== null) {
+            return $map;
+        }
+
+        $map = [];
+        foreach (self::FORMALS as $class => $props) {
+            $elements = [];
+            foreach ($props as $prop => $type) {
+                $element = self::XML_FORMAL_OVERRIDES[$class][$prop] ?? $prop;
+                $elements[$element] = $type === 'array' ? '_' . $element : $prop;
+            }
+            $map[self::JSON_KEYS[$class]] = $elements;
+        }
+        return $map;
+    }
+
+    /**
      * Extracts formal attribute values from a relation record as an associative array.
      *
      * @return array<string, mixed>

@@ -14,37 +14,30 @@ use Prov\Entity;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\ProvRecord;
+use Prov\Model\ProvRelation;
+use Prov\Model\RelationMetadata;
 use Prov\Relation\Alternate;
-use Prov\Relation\Association;
-use Prov\Relation\Attribution;
-use Prov\Relation\Communication;
-use Prov\Relation\Delegation;
-use Prov\Relation\Derivation;
 use Prov\Relation\Dictionary\DictionaryInsertion;
 use Prov\Relation\Dictionary\DictionaryMembership;
 use Prov\Relation\Dictionary\DictionaryRemoval;
-use Prov\Relation\End;
-use Prov\Relation\Generation;
-use Prov\Relation\Influence;
-use Prov\Relation\Invalidation;
 use Prov\Relation\Membership;
 use Prov\Relation\Mention;
 use Prov\Relation\Specialization;
-use Prov\Relation\Start;
-use Prov\Relation\Usage;
 
 /**
  * Writes Documents in PROV-N, the W3C's human-readable textual notation
  * for PROV. Paired with `ProvNDeserializer` for the read direction.
- *
- * @mago-ignore analysis:unused-method
  */
 class ProvNSerializer implements ProvSerializerInterface
 {
+    private readonly string $indentPrefix;
+
     public function __construct(
         public readonly int $indentation = 2,
         public readonly bool $includeDefaultNamespace = true,
-    ) {}
+    ) {
+        $this->indentPrefix = str_repeat(' ', $this->indentation);
+    }
 
     private ?PrefixMinter $minter = null;
 
@@ -65,7 +58,7 @@ class ProvNSerializer implements ProvSerializerInterface
         $minter = new PrefixMinter($nsManager);
         $this->minter = $minter;
 
-        $indent = $this->indentPrefix();
+        $indent = $this->indentPrefix;
 
         // The body is rendered before the prefix block so that namespaces minted
         // for undeclared attribute keys can still be declared in the header.
@@ -122,7 +115,7 @@ class ProvNSerializer implements ProvSerializerInterface
             }
         }
 
-        $indent = $this->indentPrefix();
+        $indent = $this->indentPrefix;
         $indent2 = $indent . $indent;
         $lines[] = $indent . 'bundle ' . $this->formatQualifiedName($bundle->identifier);
 
@@ -151,47 +144,19 @@ class ProvNSerializer implements ProvSerializerInterface
         $lines[] = $indent . 'endBundle';
     }
 
-    /**
-     * Dispatches a record to its per-type serialize method via a hash lookup on
-     * the concrete class name.
-     *
-     * @var array<class-string<\Prov\Model\ProvRecord>, string>
-     */
-    private const array RECORD_DISPATCH = [
-        Entity::class => 'serializeEntity',
-        Activity::class => 'serializeActivity',
-        Agent::class => 'serializeAgent',
-        Generation::class => 'serializeGeneration',
-        Usage::class => 'serializeUsage',
-        Communication::class => 'serializeCommunication',
-        Start::class => 'serializeStart',
-        End::class => 'serializeEnd',
-        Invalidation::class => 'serializeInvalidation',
-        Derivation::class => 'serializeDerivation',
-        Attribution::class => 'serializeAttribution',
-        Association::class => 'serializeAssociation',
-        Delegation::class => 'serializeDelegation',
-        Influence::class => 'serializeInfluence',
-        Specialization::class => 'serializeSpecialization',
-        Alternate::class => 'serializeAlternate',
-        Membership::class => 'serializeMembership',
-        Mention::class => 'serializeMention',
-        DictionaryMembership::class => 'serializeDictMembership',
-        DictionaryInsertion::class => 'serializeDictInsertion',
-        DictionaryRemoval::class => 'serializeDictRemoval',
-    ];
-
     private function serializeRecord(ProvRecord $record, NamespaceManager $nsManager): ?string
     {
-        $method = self::RECORD_DISPATCH[$record::class] ?? null;
-        if ($method === null) {
-            return null;
-        }
-        // @mago-expect analysis:string-member-selector
-        // @mago-expect analysis:mixed-assignment
-        $result = $this->$method($record, $nsManager);
-        assert(is_string($result));
-        return $result;
+        return match (true) {
+            $record instanceof Entity => $this->serializeEntity($record, $nsManager),
+            $record instanceof Activity => $this->serializeActivity($record, $nsManager),
+            $record instanceof Agent => $this->serializeAgent($record, $nsManager),
+            $record instanceof DictionaryMembership => $this->serializeDictMembership($record),
+            $record instanceof DictionaryInsertion => $this->serializeDictInsertion($record, $nsManager),
+            $record instanceof DictionaryRemoval => $this->serializeDictRemoval($record, $nsManager),
+            $record instanceof ProvRelation && isset(RelationMetadata::FORMALS[$record::class])
+                => $this->serializeRelation($record, $nsManager),
+            default => null,
+        };
     }
 
     private function serializeEntity(Entity $entity, NamespaceManager $nsManager): string
@@ -227,201 +192,54 @@ class ProvNSerializer implements ProvSerializerInterface
         return "agent({$id}" . $this->formatAttributes($agent->attributes, $nsManager) . ')';
     }
 
-    private function serializeGeneration(Generation $gen, NamespaceManager $nsManager): string
+    /**
+     * PROV-N productions without an optional identifier slot; an identifier
+     * on such a record is dropped, matching the grammar.
+     *
+     * @var array<class-string<\Prov\Model\ProvRelation>, true>
+     */
+    private const array RELATIONS_WITHOUT_ID = [
+        Specialization::class => true,
+        Alternate::class => true,
+        Membership::class => true,
+        Mention::class => true,
+    ];
+
+    /**
+     * Serializes any standard relation from its RelationMetadata definition:
+     * `keyword(id; ref, ..., time, [attrs])` with `-` for absent formals and
+     * the `id;` slot omitted for anonymous relations (and always for the
+     * productions in RELATIONS_WITHOUT_ID). The PROV-DICT relations have
+     * set-valued arguments and keep dedicated methods.
+     */
+    private function serializeRelation(ProvRelation $record, NamespaceManager $nsManager): string
     {
-        $entity = $this->formatOptionalId($gen->entity);
-        $activity = $this->formatOptionalId($gen->activity);
-        $time = $gen->time !== null ? Literal::formatDateTime($gen->time) : '-';
-        $prefix = $gen->identifier !== null
-            ? 'wasGeneratedBy(' . $this->formatQualifiedName($gen->identifier) . "; {$entity}, {$activity}, {$time}"
-            : "wasGeneratedBy({$entity}, {$activity}, {$time}";
-        if ($gen->attributes->isEmpty()) {
-            return $prefix . ')';
+        $keyword = RelationMetadata::JSON_KEYS[$record::class];
+        $formals = RelationMetadata::extractFormals($record);
+
+        $parts = [];
+        foreach (RelationMetadata::FORMALS[$record::class] as $prop => $type) {
+            // @mago-expect analysis:mixed-assignment
+            $value = $formals[$prop];
+            if ($type === 'ref') {
+                $parts[] = $this->formatOptionalId($value instanceof QualifiedName ? $value : null);
+            } elseif ($type === 'time') {
+                $parts[] = $value instanceof \DateTimeImmutable ? Literal::formatDateTime($value) : '-';
+            }
         }
-        return $prefix . $this->formatAttributes($gen->attributes, $nsManager) . ')';
-    }
+        $args = implode(', ', $parts);
 
-    private function serializeUsage(Usage $usage, NamespaceManager $nsManager): string
-    {
-        $activity = $this->formatOptionalId($usage->activity);
-        $entity = $this->formatOptionalId($usage->entity);
-        $time = $usage->time !== null ? Literal::formatDateTime($usage->time) : '-';
-        $prefix = $usage->identifier !== null
-            ? 'used(' . $this->formatQualifiedName($usage->identifier) . "; {$activity}, {$entity}, {$time}"
-            : "used({$activity}, {$entity}, {$time}";
-        if ($usage->attributes->isEmpty()) {
-            return $prefix . ')';
-        }
-        return $prefix . $this->formatAttributes($usage->attributes, $nsManager) . ')';
-    }
+        $identifier = isset(self::RELATIONS_WITHOUT_ID[$record::class]) ? null : $record->identifier;
+        $prefix = $identifier !== null
+            ? $keyword . '(' . $this->formatQualifiedName($identifier) . '; ' . $args
+            : $keyword . '(' . $args;
 
-    private function serializeCommunication(Communication $comm, NamespaceManager $nsManager): string
-    {
-        $informed = $this->formatOptionalId($comm->informed);
-        $informant = $this->formatOptionalId($comm->informant);
-        $prefix = $comm->identifier !== null
-            ? 'wasInformedBy(' . $this->formatQualifiedName($comm->identifier) . "; {$informed}, {$informant}"
-            : "wasInformedBy({$informed}, {$informant}";
-        return $comm->attributes->isEmpty()
+        return $record->attributes->isEmpty()
             ? $prefix . ')'
-            : $prefix . $this->formatAttributes($comm->attributes, $nsManager) . ')';
+            : $prefix . $this->formatAttributes($record->attributes, $nsManager) . ')';
     }
 
-    private function serializeStart(Start $start, NamespaceManager $nsManager): string
-    {
-        $activity = $this->formatOptionalId($start->activity);
-        $trigger = $this->formatOptionalId($start->trigger);
-        $starter = $this->formatOptionalId($start->starter);
-        $time = $start->time !== null ? Literal::formatDateTime($start->time) : '-';
-        $prefix = $start->identifier !== null
-            ? 'wasStartedBy('
-            . $this->formatQualifiedName($start->identifier)
-            . "; {$activity}, {$trigger}, {$starter}, {$time}"
-            : "wasStartedBy({$activity}, {$trigger}, {$starter}, {$time}";
-        return $start->attributes->isEmpty()
-            ? $prefix . ')'
-            : $prefix . $this->formatAttributes($start->attributes, $nsManager) . ')';
-    }
-
-    private function serializeEnd(End $end, NamespaceManager $nsManager): string
-    {
-        $activity = $this->formatOptionalId($end->activity);
-        $trigger = $this->formatOptionalId($end->trigger);
-        $ender = $this->formatOptionalId($end->ender);
-        $time = $end->time !== null ? Literal::formatDateTime($end->time) : '-';
-        $prefix = $end->identifier !== null
-            ? 'wasEndedBy('
-            . $this->formatQualifiedName($end->identifier)
-            . "; {$activity}, {$trigger}, {$ender}, {$time}"
-            : "wasEndedBy({$activity}, {$trigger}, {$ender}, {$time}";
-        return $end->attributes->isEmpty()
-            ? $prefix . ')'
-            : $prefix . $this->formatAttributes($end->attributes, $nsManager) . ')';
-    }
-
-    private function serializeInvalidation(Invalidation $inv, NamespaceManager $nsManager): string
-    {
-        $entity = $this->formatOptionalId($inv->entity);
-        $activity = $this->formatOptionalId($inv->activity);
-        $time = $inv->time !== null ? Literal::formatDateTime($inv->time) : '-';
-        $prefix = $inv->identifier !== null
-            ? 'wasInvalidatedBy(' . $this->formatQualifiedName($inv->identifier) . "; {$entity}, {$activity}, {$time}"
-            : "wasInvalidatedBy({$entity}, {$activity}, {$time}";
-        return $inv->attributes->isEmpty()
-            ? $prefix . ')'
-            : $prefix . $this->formatAttributes($inv->attributes, $nsManager) . ')';
-    }
-
-    private function serializeDerivation(Derivation $der, NamespaceManager $nsManager): string
-    {
-        $generatedEntity = $this->formatOptionalId($der->generatedEntity);
-        $usedEntity = $this->formatOptionalId($der->usedEntity);
-        $activity = $this->formatOptionalId($der->activity);
-        $generation = $this->formatOptionalId($der->generation);
-        $usage = $this->formatOptionalId($der->usage);
-        $prefix = $der->identifier !== null
-            ? 'wasDerivedFrom('
-            . $this->formatQualifiedName($der->identifier)
-            . "; {$generatedEntity}, {$usedEntity}, {$activity}, {$generation}, {$usage}"
-            : "wasDerivedFrom({$generatedEntity}, {$usedEntity}, {$activity}, {$generation}, {$usage}";
-        return $der->attributes->isEmpty()
-            ? $prefix . ')'
-            : $prefix . $this->formatAttributes($der->attributes, $nsManager) . ')';
-    }
-
-    private function serializeAttribution(Attribution $attr, NamespaceManager $nsManager): string
-    {
-        $entity = $this->formatOptionalId($attr->entity);
-        $agent = $this->formatOptionalId($attr->agent);
-        $prefix = $attr->identifier !== null
-            ? 'wasAttributedTo(' . $this->formatQualifiedName($attr->identifier) . "; {$entity}, {$agent}"
-            : "wasAttributedTo({$entity}, {$agent}";
-        return $attr->attributes->isEmpty()
-            ? $prefix . ')'
-            : $prefix . $this->formatAttributes($attr->attributes, $nsManager) . ')';
-    }
-
-    private function serializeAssociation(Association $assoc, NamespaceManager $nsManager): string
-    {
-        $activity = $this->formatOptionalId($assoc->activity);
-        $agent = $this->formatOptionalId($assoc->agent);
-        $plan = $this->formatOptionalId($assoc->plan);
-        $prefix = $assoc->identifier !== null
-            ? 'wasAssociatedWith(' . $this->formatQualifiedName($assoc->identifier) . "; {$activity}, {$agent}, {$plan}"
-            : "wasAssociatedWith({$activity}, {$agent}, {$plan}";
-        return $assoc->attributes->isEmpty()
-            ? $prefix . ')'
-            : $prefix . $this->formatAttributes($assoc->attributes, $nsManager) . ')';
-    }
-
-    private function serializeDelegation(Delegation $del, NamespaceManager $nsManager): string
-    {
-        $delegate = $this->formatOptionalId($del->delegate);
-        $responsible = $this->formatOptionalId($del->responsible);
-        $activity = $this->formatOptionalId($del->activity);
-        $prefix = $del->identifier !== null
-            ? 'actedOnBehalfOf('
-            . $this->formatQualifiedName($del->identifier)
-            . "; {$delegate}, {$responsible}, {$activity}"
-            : "actedOnBehalfOf({$delegate}, {$responsible}, {$activity}";
-        return $del->attributes->isEmpty()
-            ? $prefix . ')'
-            : $prefix . $this->formatAttributes($del->attributes, $nsManager) . ')';
-    }
-
-    private function serializeInfluence(Influence $inf, NamespaceManager $nsManager): string
-    {
-        $influencee = $this->formatOptionalId($inf->influencee);
-        $influencer = $this->formatOptionalId($inf->influencer);
-        $prefix = $inf->identifier !== null
-            ? 'wasInfluencedBy(' . $this->formatQualifiedName($inf->identifier) . "; {$influencee}, {$influencer}"
-            : "wasInfluencedBy({$influencee}, {$influencer}";
-        return $inf->attributes->isEmpty()
-            ? $prefix . ')'
-            : $prefix . $this->formatAttributes($inf->attributes, $nsManager) . ')';
-    }
-
-    private function serializeSpecialization(Specialization $spec, NamespaceManager $nsManager): string
-    {
-        $specific = $this->formatOptionalId($spec->specificEntity);
-        $general = $this->formatOptionalId($spec->generalEntity);
-        return $spec->attributes->isEmpty()
-            ? "specializationOf({$specific}, {$general})"
-            : "specializationOf({$specific}, {$general}" . $this->formatAttributes($spec->attributes, $nsManager) . ')';
-    }
-
-    private function serializeAlternate(Alternate $alt, NamespaceManager $nsManager): string
-    {
-        $a1 = $this->formatOptionalId($alt->alternate1);
-        $a2 = $this->formatOptionalId($alt->alternate2);
-        return $alt->attributes->isEmpty()
-            ? "alternateOf({$a1}, {$a2})"
-            : "alternateOf({$a1}, {$a2}" . $this->formatAttributes($alt->attributes, $nsManager) . ')';
-    }
-
-    private function serializeMembership(Membership $mem, NamespaceManager $nsManager): string
-    {
-        $collection = $this->formatOptionalId($mem->collection);
-        $entity = $this->formatOptionalId($mem->entity);
-        return $mem->attributes->isEmpty()
-            ? "hadMember({$collection}, {$entity})"
-            : "hadMember({$collection}, {$entity}" . $this->formatAttributes($mem->attributes, $nsManager) . ')';
-    }
-
-    private function serializeMention(Mention $men, NamespaceManager $nsManager): string
-    {
-        $specific = $this->formatOptionalId($men->specificEntity);
-        $general = $this->formatOptionalId($men->generalEntity);
-        $bundle = $this->formatOptionalId($men->bundle);
-        return $men->attributes->isEmpty()
-            ? "mentionOf({$specific}, {$general}, {$bundle})"
-            : "mentionOf({$specific}, {$general}, {$bundle}"
-            . $this->formatAttributes($men->attributes, $nsManager)
-            . ')';
-    }
-
-    // @mago-expect analysis:unused-parameter
-    private function serializeDictMembership(DictionaryMembership $dm, NamespaceManager $nsManager): string
+    private function serializeDictMembership(DictionaryMembership $dm): string
     {
         $lines = [];
         foreach ($dm->keyEntityPairs as $pair) {
@@ -430,7 +248,7 @@ class ProvNSerializer implements ProvSerializerInterface
             $key = $this->formatDictKey($pair->key);
             $lines[] = "prov:hadDictionaryMember({$dict}, {$entity}, {$key})";
         }
-        return implode("\n" . str_repeat(' ', $this->indentation), $lines);
+        return implode("\n" . $this->indentPrefix, $lines);
     }
 
     private function serializeDictInsertion(DictionaryInsertion $di, NamespaceManager $nsManager): string
@@ -687,11 +505,4 @@ class ProvNSerializer implements ProvSerializerInterface
     {
         return str_replace(['\\', '"', "\n", "\r", "\t"], ['\\\\', '\\"', '\\n', '\\r', '\\t'], $s);
     }
-
-    private function indentPrefix(): string
-    {
-        return $this->indentPrefix ??= str_repeat(' ', $this->indentation);
-    }
-
-    private ?string $indentPrefix = null;
 }

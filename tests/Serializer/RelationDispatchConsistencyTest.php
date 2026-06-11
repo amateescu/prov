@@ -7,8 +7,11 @@ namespace Prov\Tests\Serializer;
 use PHPUnit\Framework\TestCase;
 use Prov\Model\ProvRelation;
 use Prov\Model\RelationMetadata;
+use Prov\Relation\Dictionary\DictionaryInsertion;
+use Prov\Relation\Dictionary\DictionaryMembership;
+use Prov\Relation\Dictionary\DictionaryRemoval;
+use Prov\Relation\Mention;
 use Prov\Serializer\ProvNSerializer;
-use Prov\Serializer\XmlSerializer;
 
 /**
  * Guards the relation set against drifting out of sync across the metadata registry and
@@ -51,10 +54,16 @@ final class RelationDispatchConsistencyTest extends TestCase
         // Guard against a broken discovery path making the assertions vacuous.
         $this->assertNotEmpty($relations);
 
-        /** @var array<string, string> $recordDispatch */
-        $recordDispatch = new \ReflectionClass(ProvNSerializer::class)->getConstant('RECORD_DISPATCH');
-        /** @var array<string, array<string, string>> $xmlChildren */
-        $xmlChildren = new \ReflectionClass(XmlSerializer::class)->getConstant('FORMAL_CHILD_ELEMENTS');
+        // Relations PROV-O encodes specially: Mention has a hand-written
+        // JSON-LD shape and the Dictionary extension has no shortcut form.
+        $jsonLdExempt = [
+            DictionaryInsertion::class,
+            DictionaryMembership::class,
+            DictionaryRemoval::class,
+            Mention::class,
+        ];
+
+        $xmlChildren = RelationMetadata::xmlChildElements();
 
         foreach ($relations as $relation) {
             $this->assertArrayHasKey(
@@ -67,17 +76,20 @@ final class RelationDispatchConsistencyTest extends TestCase
                 RelationMetadata::JSON_KEYS,
                 "{$relation} missing from RelationMetadata::JSON_KEYS",
             );
-            $this->assertArrayHasKey(
-                $relation,
-                $recordDispatch,
-                "{$relation} missing from ProvNSerializer::RECORD_DISPATCH",
-            );
+
+            if (!in_array($relation, $jsonLdExempt, true)) {
+                $this->assertArrayHasKey(
+                    $relation,
+                    RelationMetadata::JSONLD,
+                    "{$relation} missing from RelationMetadata::JSONLD",
+                );
+            }
 
             $jsonKey = RelationMetadata::JSON_KEYS[$relation];
             $this->assertArrayHasKey(
                 $jsonKey,
                 $xmlChildren,
-                "'{$jsonKey}' missing from XmlSerializer::FORMAL_CHILD_ELEMENTS",
+                "'{$jsonKey}' missing from RelationMetadata::xmlChildElements()",
             );
         }
     }
@@ -87,6 +99,46 @@ final class RelationDispatchConsistencyTest extends TestCase
         $relations = self::relationClasses();
         $this->assertSame($relations, $this->sortedKeys(RelationMetadata::FORMALS));
         $this->assertSame($relations, $this->sortedKeys(RelationMetadata::JSON_KEYS));
+    }
+
+    public function testJsonLdPropertiesReferenceRealFormals(): void
+    {
+        foreach (RelationMetadata::JSONLD as $class => $spec) {
+            foreach (array_keys($spec['properties']) as $prop) {
+                $this->assertArrayHasKey(
+                    $prop,
+                    RelationMetadata::FORMALS[$class],
+                    "JSONLD property '{$prop}' is not a formal of {$class}",
+                );
+            }
+        }
+    }
+
+    public function testXmlOverridesReferenceRealFormals(): void
+    {
+        foreach (RelationMetadata::XML_FORMAL_OVERRIDES as $class => $overrides) {
+            foreach (array_keys($overrides) as $prop) {
+                $this->assertArrayHasKey(
+                    $prop,
+                    RelationMetadata::FORMALS[$class],
+                    "XML override '{$prop}' is not a formal of {$class}",
+                );
+            }
+        }
+    }
+
+    public function testProvNNoIdTableReferencesRealRelations(): void
+    {
+        /** @var array<class-string, true> $withoutId */
+        $withoutId = new \ReflectionClass(ProvNSerializer::class)->getConstant('RELATIONS_WITHOUT_ID');
+        $this->assertNotEmpty($withoutId);
+        foreach (array_keys($withoutId) as $class) {
+            $this->assertArrayHasKey(
+                $class,
+                RelationMetadata::FORMALS,
+                "ProvNSerializer::RELATIONS_WITHOUT_ID references unknown relation {$class}",
+            );
+        }
     }
 
     /**
