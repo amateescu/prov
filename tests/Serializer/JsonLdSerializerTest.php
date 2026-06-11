@@ -456,6 +456,36 @@ final class JsonLdSerializerTest extends TestCase
         $this->assertSame('prov:Revision', $qDer['prov:type']['@id']);
     }
 
+    // Mention (cross-bundle reference)
+
+    public function testMentionWithBundleShape(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:specific');
+        $builder->mentionOf(specificEntity: 'ex:specific', generalEntity: 'ex:general', bundle: 'ex:b1');
+        $data = $this->serializeToArray($builder);
+
+        $node = $this->getNode($data, 'ex:specific');
+        $this->assertSame(
+            [
+                'prov:asInBundle' => ['@id' => 'ex:b1'],
+                'prov:mentionOf' => ['@id' => 'ex:general'],
+            ],
+            $node['prov:mentionOf'],
+        );
+    }
+
+    public function testMentionWithoutBundleIsPlainReference(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:specific');
+        $builder->mentionOf(specificEntity: 'ex:specific', generalEntity: 'ex:general');
+        $data = $this->serializeToArray($builder);
+
+        $node = $this->getNode($data, 'ex:specific');
+        $this->assertSame(['@id' => 'ex:general'], $node['prov:mentionOf']);
+    }
+
     // Multi-value relations
 
     public function testMultipleRelationsOnSameSubject(): void

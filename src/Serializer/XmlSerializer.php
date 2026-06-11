@@ -12,6 +12,7 @@ use Prov\Bundle;
 use Prov\Document;
 use Prov\Entity;
 use Prov\Exception\DeserializationException;
+use Prov\Exception\NamespaceException;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
@@ -392,22 +393,31 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $parts = explode(':', $prefixedKey, 2);
         // XML element names can't start with a digit; PROV-XML's convention is to
         // prefix such local parts with an underscore.
-        if (count($parts) === 2) {
-            $local = $parts[1];
-            if ($local !== '' && ctype_digit($local[0])) {
-                $prefixedKey = $parts[0] . ':_' . $local;
-            }
-            $ns = $nsManager->getNamespace($parts[0]);
-            if ($ns !== null) {
-                $el = $dom->createElementNS($ns->uri, $prefixedKey);
+        try {
+            if (count($parts) === 2) {
+                $local = $parts[1];
+                if ($local !== '' && ctype_digit($local[0])) {
+                    $prefixedKey = $parts[0] . ':_' . $local;
+                }
+                $ns = $nsManager->getNamespace($parts[0]);
+                if ($ns !== null) {
+                    $el = $dom->createElementNS($ns->uri, $prefixedKey);
+                } else {
+                    $el = $dom->createElement($prefixedKey);
+                }
             } else {
+                if ($prefixedKey !== '' && ctype_digit($prefixedKey[0])) {
+                    $prefixedKey = '_' . $prefixedKey;
+                }
                 $el = $dom->createElement($prefixedKey);
             }
-        } else {
-            if ($prefixedKey !== '' && ctype_digit($prefixedKey[0])) {
-                $prefixedKey = '_' . $prefixedKey;
-            }
-            $el = $dom->createElement($prefixedKey);
+        } catch (\DOMException) {
+            // PROV-XML encodes attribute keys as element names, so a local part
+            // carrying characters that XML names forbid (PROV-N escapes like
+            // "\=" survive in JSON and PROV-N) has no XML representation.
+            throw new \InvalidArgumentException(
+                "Attribute key '{$prefixedKey}' cannot be represented as a PROV-XML element name.",
+            );
         }
 
         if ($value instanceof QualifiedName) {
@@ -444,8 +454,35 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $el = $dom->createElementNS(self::PROV_NS, 'prov:bundleContent');
         $el->setAttributeNS(self::PROV_NS, 'prov:id', (string) $bundle->identifier);
 
+        // Bundle-level declarations become xmlns attributes on the
+        // bundleContent element, mirroring how the deserializer reads them
+        // back via extractLocalNamespaces(). Declarations identical to a
+        // document-level one are inherited and need no repeat. The attributes
+        // are written as plain attributes (not namespace-declaration nodes):
+        // libxml's namespace reconciliation drops a declaration node whose URI
+        // is already in scope under another prefix, but these declarations are
+        // load-bearing for the prefixed prov:id strings inside the bundle. The
+        // library's reserved 'default' prefix is declared by its literal name,
+        // matching how the ids reference it (e.g. prov:id="default:e001").
+        $bundleNsManager = new NamespaceManager($nsManager);
+        foreach ($bundle->namespaces as $ns) {
+            $existing = $nsManager->getNamespace($ns->prefix);
+            if ($existing !== null && $existing->uri === $ns->uri) {
+                continue;
+            }
+            if ($ns->prefix === 'default') {
+                $el->setAttribute('xmlns:default', $ns->uri);
+                $bundleNsManager->setDefault($ns);
+                continue;
+            }
+            if ($ns->prefix !== 'prov' && $ns->prefix !== 'xsd') {
+                $el->setAttribute('xmlns:' . $ns->prefix, $ns->uri);
+            }
+            $bundleNsManager->add($ns);
+        }
+
         foreach ($bundle->records as $record) {
-            $this->serializeRecord($dom, $el, $record, $nsManager);
+            $this->serializeRecord($dom, $el, $record, $bundleNsManager);
         }
 
         $parent->appendChild($el);
@@ -493,11 +530,19 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         }
 
         $nsManager = new NamespaceManager();
-        $this->extractLocalNamespaces($root, $nsManager);
 
         $records = [];
         $bundles = [];
-        $this->deserializeChildren($root, $nsManager, $records, $bundles);
+        try {
+            $this->extractLocalNamespaces($root, $nsManager);
+            $this->deserializeChildren($root, $nsManager, $records, $bundles);
+        } catch (NamespaceException|\InvalidArgumentException $e) {
+            // An unresolvable or invalid identifier (undeclared prefix, missing
+            // default namespace, conflicting declarations, empty local part)
+            // means the input is malformed; surface it under the
+            // deserialization contract.
+            throw new DeserializationException('Invalid PROV-XML: ' . $e->getMessage(), previous: $e);
+        }
         assert(is_array($bundles));
 
         return new Document(records: $records, bundles: $bundles, namespaces: $nsManager->getRegisteredNamespaces());

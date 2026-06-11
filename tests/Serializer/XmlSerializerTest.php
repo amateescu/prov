@@ -55,6 +55,23 @@ final class XmlSerializerTest extends TestCase
         $this->assertStringContainsString('ex:e1', $xml);
     }
 
+    public function testSpecialCharactersAreEscapedAndRoundTrip(): void
+    {
+        $value = 'a < b && "c" > \'d\'';
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1', ['ex:label' => Literal::string($value)]);
+        $xml = $this->serializer->serialize($builder->build());
+
+        // The markup-significant characters must be escaped in the output and
+        // the original value restored on parse.
+        $this->assertStringContainsString('a &lt; b &amp;&amp;', $xml);
+        $this->assertStringNotContainsString($value, $xml);
+
+        $roundTripped = $this->serializer->deserialize($xml);
+        $literals = $roundTripped->entities[0]->attributes->getLiterals($this->ex->qualifiedName('label'));
+        $this->assertSame($value, $literals[0]->value ?? null);
+    }
+
     public function testSerializeActivity(): void
     {
         $builder = $this->buildDoc();

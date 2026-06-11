@@ -860,47 +860,36 @@ final class JsonSerializerTest extends TestCase
 
     public function testRoundTripUnicodeRightQuotationMark(): void
     {
-        $builder = $this->buildDoc();
-        $builder->entity('ex:e1', ['prov:label' => Literal::string("it\u{2019}s a test")]);
-        $doc = $builder->build();
-        $json = $this->serializer->serialize($doc);
-        $this->assertStringContainsString("\u{2019}", $json);
-
-        $doc2 = $this->serializer->deserialize($json);
-        $this->assertFalse($doc2->entities[0]->attributes->isEmpty());
+        $this->assertUnicodeValueRoundTrips("it\u{2019}s a test");
     }
 
     public function testRoundTripUnicodeChinese(): void
     {
-        $builder = $this->buildDoc();
-        $builder->entity('ex:e1', ['prov:label' => Literal::string("\u{4e16}\u{754c}")]);
-        $doc = $builder->build();
-        $json = $this->serializer->serialize($doc);
-        $doc2 = $this->serializer->deserialize($json);
-
-        $this->assertFalse($doc2->entities[0]->attributes->isEmpty());
+        $this->assertUnicodeValueRoundTrips("\u{4e16}\u{754c}");
     }
 
     public function testRoundTripUnicodeEmoji(): void
     {
-        $builder = $this->buildDoc();
-        $builder->entity('ex:e1', ['prov:label' => Literal::string("\u{1F600}")]);
-        $doc = $builder->build();
-        $json = $this->serializer->serialize($doc);
-        $doc2 = $this->serializer->deserialize($json);
-
-        $this->assertFalse($doc2->entities[0]->attributes->isEmpty());
+        $this->assertUnicodeValueRoundTrips("\u{1F600}");
     }
 
     public function testRoundTripUnicodeArabic(): void
     {
+        $this->assertUnicodeValueRoundTrips("\u{0645}\u{0631}\u{062D}\u{0628}\u{0627}");
+    }
+
+    private function assertUnicodeValueRoundTrips(string $value): void
+    {
         $builder = $this->buildDoc();
-        $builder->entity('ex:e1', ['prov:label' => Literal::string("\u{0645}\u{0631}\u{062D}\u{0628}\u{0627}")]);
+        $builder->entity('ex:e1', ['prov:label' => Literal::string($value)]);
         $doc = $builder->build();
         $json = $this->serializer->serialize($doc);
-        $doc2 = $this->serializer->deserialize($json);
+        $this->assertStringContainsString($value, $json);
 
-        $this->assertFalse($doc2->entities[0]->attributes->isEmpty());
+        $doc2 = $this->serializer->deserialize($json);
+        $prov = new ProvNamespace('prov', 'http://www.w3.org/ns/prov#');
+        $literals = $doc2->entities[0]->attributes->getLiterals($prov->qualifiedName('label'));
+        $this->assertSame($value, $literals[0]->value ?? null);
     }
 
     // Phase 5: Document structure edge cases

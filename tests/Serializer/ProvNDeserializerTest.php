@@ -71,8 +71,10 @@ final class ProvNDeserializerTest extends TestCase
 
     public function testUnknownPrefixInRecordThrows(): void
     {
-        // If the prefix declaration is missing, resolving ex:e1 must fail.
-        $this->expectException(\Prov\Exception\NamespaceException::class);
+        // If the prefix declaration is missing, the input is malformed and the
+        // failure surfaces under the deserialization contract.
+        $this->expectException(\Prov\Exception\DeserializationException::class);
+        $this->expectExceptionMessage("Prefix 'unknown' is not registered");
         $this->parse("document\nentity(unknown:e1)\nendDocument");
     }
 
