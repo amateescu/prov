@@ -6,6 +6,7 @@ namespace Prov\Serializer;
 
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\ProvNamespace;
+use Prov\Identifier\QualifiedName;
 
 /**
  * Converts attribute-key URIs to prefixed form during serialization, minting
@@ -63,6 +64,56 @@ final class PrefixMinter
         }
 
         return $ns->prefix . ':' . $localPart;
+    }
+
+    /**
+     * Returns the prefix to write for a qualified name, ensuring its namespace
+     * is declared on the document manager: minting a synthetic prefix when the
+     * namespace is undeclared, and preferring the name's own prefix when it is
+     * free. Unlike `uriToPrefixed()`, the name's own namespace boundary is
+     * preserved, so a local part containing `/` or `#` is never re-split.
+     *
+     * The reserved `default` prefix is a sentinel and is never written or
+     * declared; a name carrying it resolves to an existing declaration of the
+     * same URI or to a minted real prefix. The availability checks consult the
+     * document-level manager only: a bundle that locally rebinds the same
+     * prefix to another URI shadows the declaration for records inside that
+     * bundle, so such names can mis-resolve on read.
+     */
+    public function prefixFor(QualifiedName $qn): string
+    {
+        $ns = $qn->namespace;
+
+        if ($ns->prefix !== 'default') {
+            $existing = $this->documentManager->getNamespace($ns->prefix);
+            if ($existing !== null && $existing->uri === $ns->uri) {
+                return $ns->prefix;
+            }
+        }
+
+        $minted = $this->minted[$ns->uri] ?? null;
+        if ($minted !== null) {
+            return $minted->prefix;
+        }
+
+        // Prefer an existing declaration of the same URI over declaring an
+        // alias prefix for it.
+        foreach ($this->documentManager->getRegisteredNamespaces() as $declared) {
+            if ($declared->uri === $ns->uri && $declared->prefix !== 'default') {
+                return $declared->prefix;
+            }
+        }
+
+        $ownPrefixIsFree =
+            $ns->prefix !== ''
+            && $ns->prefix !== 'default'
+            && $this->documentManager->getNamespace($ns->prefix) === null;
+        $prefix = $ownPrefixIsFree ? $ns->prefix : $this->mintPrefix($ns->uri);
+        $declared = new ProvNamespace($prefix, $ns->uri);
+        $this->documentManager->add($declared);
+        $this->minted[$ns->uri] = $declared;
+
+        return $prefix;
     }
 
     /**

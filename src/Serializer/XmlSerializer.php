@@ -62,8 +62,6 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
 
     private ?PrefixMinter $minter = null;
 
-    private ?NamespaceManager $documentManager = null;
-
     /** URI of the document-level default namespace, or null if none is declared. */
     private ?string $documentDefaultUri = null;
 
@@ -111,7 +109,6 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         }
         // Minted namespaces need no root declaration: createElementNS declares
         // them on the elements that use them.
-        $this->documentManager = $nsManager;
         $minter = new PrefixMinter($nsManager);
         $this->minter = $minter;
 
@@ -244,23 +241,28 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
 
     /**
      * The QName string to write for an identifier (prov:id, prov:ref, or an
-     * xsd:QName value). A real prefix is written verbatim. A default-namespace
-     * identifier is written as a bare local part only when it lives in the
-     * document's default namespace (bound by the root xmlns); one from another
-     * scope (e.g. a bundle-local default) is routed through a real declared or
-     * minted prefix, so it never relies on an element-level default xmlns,
-     * which libxml's namespace reconciliation can drop.
+     * xsd:QName value). A declared prefix is written verbatim; an undeclared
+     * (or prefix-conflicting) namespace is routed through the minter so a
+     * binding xmlns lands on the root rather than emitting an unbound prefix.
+     * A default-namespace identifier is written as a bare local part only when
+     * it lives in the document's default namespace (bound by the root xmlns);
+     * one from another scope (e.g. a bundle-local default) is routed through a
+     * real declared or minted prefix, so it never relies on an element-level
+     * default xmlns, which libxml's namespace reconciliation can drop.
      */
     private function xmlIdentifier(QualifiedName $qn): string
     {
         if ($qn->namespace->prefix !== 'default') {
-            return (string) $qn;
+            if ($qn->isBlank() || $this->minter === null) {
+                return (string) $qn;
+            }
+            return $this->minter->prefixFor($qn) . ':' . $qn->localPart;
         }
         if ($this->documentDefaultUri !== null && $qn->namespace->uri === $this->documentDefaultUri) {
             return $qn->localPart;
         }
-        if ($this->minter !== null && $this->documentManager !== null) {
-            return $this->minter->uriToPrefixed($qn->getUri(), $this->documentManager);
+        if ($this->minter !== null) {
+            return $this->minter->prefixFor($qn) . ':' . $qn->localPart;
         }
         return $qn->localPart;
     }

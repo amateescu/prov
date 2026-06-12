@@ -9,8 +9,10 @@ use Prov\Attribute\Attributes;
 use Prov\Document;
 use Prov\Entity;
 use Prov\Format;
+use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\ProvNamespace;
 use Prov\Prov;
+use Prov\Serializer\PrefixMinter;
 
 /**
  * An attribute key whose namespace was never declared on the document used to
@@ -73,6 +75,95 @@ final class PrefixMintingTest extends TestCase
         $data = json_decode($output, true);
 
         $this->assertContains('http://undeclared.example/vocab#', $data['@context']);
+    }
+
+    public function testPrefixForReturnsDeclaredOwnPrefixWithoutMinting(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('ex', 'http://example.org/'));
+        $minter = new PrefixMinter($manager);
+
+        $qn = new ProvNamespace('ex', 'http://example.org/')->qualifiedName('e1');
+        $this->assertSame('ex', $minter->prefixFor($qn));
+        $this->assertSame([], $minter->getMintedNamespaces());
+    }
+
+    public function testPrefixForMintsOwnPrefixWhenFree(): void
+    {
+        $manager = new NamespaceManager();
+        $minter = new PrefixMinter($manager);
+
+        $qn = new ProvNamespace('foo', 'http://foo.example/')->qualifiedName('x');
+        $this->assertSame('foo', $minter->prefixFor($qn));
+
+        $minted = $minter->getMintedNamespaces();
+        $this->assertCount(1, $minted);
+        $this->assertSame('http://foo.example/', $minted[0]->uri);
+        $this->assertSame('http://foo.example/', $manager->getNamespace('foo')?->uri);
+    }
+
+    public function testPrefixForMintsSyntheticWhenOwnPrefixTakenByDifferentUri(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('foo', 'http://existing.example/'));
+        $minter = new PrefixMinter($manager);
+
+        $qn = new ProvNamespace('foo', 'http://other.example/')->qualifiedName('x');
+        $prefix = $minter->prefixFor($qn);
+
+        $this->assertNotSame('foo', $prefix);
+        $this->assertStringStartsWith('ns', $prefix);
+    }
+
+    public function testPrefixForReusesExistingDeclarationOfSameUriInsteadOfAliasing(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('ex', 'http://example.org/'));
+        $minter = new PrefixMinter($manager);
+
+        // A different prefix object bound to an already-declared URI.
+        $qn = new ProvNamespace('other', 'http://example.org/')->qualifiedName('e1');
+        $this->assertSame('ex', $minter->prefixFor($qn));
+        $this->assertSame([], $minter->getMintedNamespaces());
+    }
+
+    public function testPrefixForCachesMintedPrefixPerUri(): void
+    {
+        $manager = new NamespaceManager();
+        $minter = new PrefixMinter($manager);
+
+        $first = $minter->prefixFor(new ProvNamespace('foo', 'http://foo.example/')->qualifiedName('x'));
+        $second = $minter->prefixFor(new ProvNamespace('foo', 'http://foo.example/')->qualifiedName('y'));
+
+        $this->assertSame($first, $second);
+        $this->assertCount(1, $minter->getMintedNamespaces());
+    }
+
+    public function testPrefixForReusesRealPrefixForDefaultSentinelName(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('ex', 'http://example.org/'));
+        $minter = new PrefixMinter($manager);
+
+        $qn = new ProvNamespace('default', 'http://example.org/')->qualifiedName('e1');
+        $this->assertSame('ex', $minter->prefixFor($qn));
+        $this->assertSame([], $minter->getMintedNamespaces());
+    }
+
+    public function testPrefixForMintsRealPrefixForUndeclaredDefaultSentinelName(): void
+    {
+        // The reserved "default" prefix is never written or declared, so a
+        // default-namespace name with no other declaration of its URI gets a
+        // minted real prefix rather than reusing "default".
+        $manager = new NamespaceManager();
+        $manager->setDefault(new ProvNamespace('default', 'http://only-default.example/'));
+        $minter = new PrefixMinter($manager);
+
+        $qn = new ProvNamespace('default', 'http://only-default.example/')->qualifiedName('e1');
+        $prefix = $minter->prefixFor($qn);
+
+        $this->assertNotSame('default', $prefix);
+        $this->assertStringStartsWith('ns', $prefix);
     }
 
     public function testUndeclaredKeyInBundleRecordsRoundTrips(): void

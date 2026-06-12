@@ -96,7 +96,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         $this->serializeRecords($document->records, $output, $nsManager);
 
         foreach ($document->bundles as $bundle) {
-            $bundleKey = $bundle->identifier->getSerializedForm();
+            $bundleKey = $this->jsonQName($bundle->identifier);
             $bundleNsManager = new NamespaceManager($nsManager);
             foreach ($bundle->namespaces as $ns) {
                 if ($ns->prefix === 'default') {
@@ -267,7 +267,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                 $bundleRecords = [];
                 $this->deserializeRecords($bundleData, $bundleNsManager, $bundleRecords);
                 $bundles[] = new Bundle(
-                    identifier: $nsManager->resolve((string) $bundleId),
+                    identifier: $this->resolveQName((string) $bundleId, $nsManager),
                     records: $bundleRecords,
                     namespaces: $bundleNsManager->getRegisteredNamespaces(),
                 );
@@ -327,7 +327,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         NamespaceManager $nsManager,
     ): void {
         $id = $record->identifier !== null
-            ? $record->identifier->getSerializedForm()
+            ? $this->jsonQName($record->identifier)
             : ($this->blankNodes[$record] ??= $this->mintBlankLabel());
         $attrs = $record->attributes->isEmpty()
             ? new \stdClass()
@@ -341,7 +341,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     private function serializeActivity(Activity $record, array &$output, NamespaceManager $nsManager): void
     {
         $id = $record->identifier !== null
-            ? $record->identifier->getSerializedForm()
+            ? $this->jsonQName($record->identifier)
             : ($this->blankNodes[$record] ??= $this->mintBlankLabel());
         $attrs = $record->attributes->isEmpty() ? [] : $this->serializeAttributes($record->attributes, $nsManager);
 
@@ -371,7 +371,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         }
 
         $id = $record->identifier !== null
-            ? $record->identifier->getSerializedForm()
+            ? $this->jsonQName($record->identifier)
             : ($this->blankNodes[$record] ??= $this->mintBlankLabel());
         $this->appendToSection($output, $relationKey, $id, $attrs ?: new \stdClass());
     }
@@ -415,7 +415,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             }
             $key = 'prov:' . $prop;
             if ($type === 'ref') {
-                $attrs[$key] = $value instanceof QualifiedName ? $value->getSerializedForm() : (string) $value;
+                $attrs[$key] = $value instanceof QualifiedName ? $this->jsonQName($value) : (string) $value;
             } elseif ($type === 'time') {
                 $attrs[$key] = Literal::formatDateTime($value);
             } elseif ($prop === 'keyEntityPairs') {
@@ -466,12 +466,12 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         if ($hasComplexKeys) {
             $set = [];
             foreach ($pairs as $pair) {
-                $entry = ['$' => $pair->entity !== null ? $pair->entity->getSerializedForm() : null];
+                $entry = ['$' => $pair->entity !== null ? $this->jsonQName($pair->entity) : null];
                 $k = $pair->key;
                 if (is_array($k)) {
                     $entry['key'] = $k;
                 } elseif ($k instanceof QualifiedName) {
-                    $entry['key'] = ['$' => $k->getSerializedForm(), 'type' => 'prov:QUALIFIED_NAME'];
+                    $entry['key'] = ['$' => $this->jsonQName($k), 'type' => 'prov:QUALIFIED_NAME'];
                 } elseif ($k instanceof Literal) {
                     $entry['key'] = $this->serializeAttributeValue($k);
                 } elseif ($k !== null) {
@@ -515,7 +515,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                 // skip rather than corrupt the output.
                 continue;
             }
-            $set[$stringKey] = $pair->entity !== null ? $pair->entity->getSerializedForm() : null;
+            $set[$stringKey] = $pair->entity !== null ? $this->jsonQName($pair->entity) : null;
         }
         $attrs['prov:key-entity-set'] = $set;
         return null;
@@ -561,6 +561,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             if (str_starts_with($key, 'default:')) {
                 $key = substr($key, strlen('default:'));
             }
+            $key = $this->escapeAttributeKey($key);
             $isMultiValue = count($values) > 1;
             foreach ($values as $value) {
                 $serialized = $this->serializeAttributeValue($value);
@@ -579,7 +580,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     {
         if ($value instanceof QualifiedName) {
             return [
-                '$' => $value->getSerializedForm(),
+                '$' => $this->jsonQName($value),
                 'type' => 'prov:QUALIFIED_NAME',
             ];
         }
@@ -587,7 +588,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         if ($value instanceof Literal) {
             $result = ['$' => $value->value];
             if ($value->datatype !== null) {
-                $result['type'] = $value->datatype->getSerializedForm();
+                $result['type'] = $this->jsonQName($value->datatype);
             }
             if ($value->languageTag !== null) {
                 $result['lang'] = $value->languageTag;
@@ -599,6 +600,60 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     }
 
     /**
+     * The `prefix:local` (or bare-local default-namespace) form of a qualified
+     * name, with `PN_CHARS_ESC` punctuation in the local part backslash-escaped.
+     * ProvToolbox's PROV-JSON uses the same escaping inside its `prefix:local`
+     * strings, so a name's canonical local part stays identical across formats.
+     */
+    private function jsonQName(QualifiedName $qn): string
+    {
+        $local = QualifiedNameEscaper::escape($qn->localPart);
+
+        // A default-namespace name is written bare; a blank-node label keeps its
+        // reserved "_" prefix. Neither needs (or can take) a declaration.
+        if ($qn->namespace->prefix === 'default') {
+            return $local;
+        }
+        if ($qn->isBlank()) {
+            return $qn->namespace->prefix . ':' . $local;
+        }
+
+        // Route through the minter so an otherwise-undeclared namespace gets a
+        // declaration emitted in the prefix map.
+        $prefix = $this->minter !== null ? $this->minter->prefixFor($qn) : $qn->namespace->prefix;
+
+        return $prefix . ':' . $local;
+    }
+
+    /**
+     * Escapes the local part of a `prefix:local` (or bare-local) attribute key,
+     * leaving the prefix untouched.
+     */
+    private function escapeAttributeKey(string $key): string
+    {
+        $colon = strpos($key, ':');
+        if ($colon === false) {
+            return QualifiedNameEscaper::escape($key);
+        }
+        return substr($key, 0, $colon + 1) . QualifiedNameEscaper::escape(substr($key, $colon + 1));
+    }
+
+    /**
+     * Resolves a `prefix:local` string from PROV-JSON to a QualifiedName,
+     * decoding any `PN_CHARS_ESC` escapes in the local part so the result
+     * matches the same name parsed from a format that needs no escaping.
+     */
+    private function resolveQName(string $raw, NamespaceManager $nsManager): QualifiedName
+    {
+        $qn = $nsManager->resolve($raw);
+        $decoded = QualifiedNameEscaper::decode($qn->localPart);
+        if ($decoded === $qn->localPart) {
+            return $qn;
+        }
+        return new QualifiedName($qn->namespace, $decoded);
+    }
+
+    /**
      * @param list<\Prov\Model\ProvRecord> $records
      */
     private function deserializeRecords(array $json, NamespaceManager $nsManager, array &$records): void
@@ -607,7 +662,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $emptyAttrs = Attributes::empty();
             foreach ($json['entity'] as $id => $attrs) {
                 $idStr = (string) $id;
-                $deserId = $nsManager->resolve($idStr);
+                $deserId = $this->resolveQName($idStr, $nsManager);
                 // Fast path: the overwhelmingly common "no attributes" case.
                 if ($attrs === [] || $attrs === null) {
                     $records[] = new Entity($deserId, $emptyAttrs);
@@ -629,7 +684,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $emptyAttrs = Attributes::empty();
             foreach ($json['activity'] as $id => $attrs) {
                 $idStr = (string) $id;
-                $deserId = $nsManager->resolve($idStr);
+                $deserId = $this->resolveQName($idStr, $nsManager);
                 if ($attrs === [] || $attrs === null) {
                     $records[] = new Activity($deserId, null, null, $emptyAttrs);
                     continue;
@@ -659,7 +714,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $emptyAttrs = Attributes::empty();
             foreach ($json['agent'] as $id => $attrs) {
                 $idStr = (string) $id;
-                $deserId = $nsManager->resolve($idStr);
+                $deserId = $this->resolveQName($idStr, $nsManager);
                 if ($attrs === [] || $attrs === null) {
                     $records[] = new Agent($deserId, $emptyAttrs);
                     continue;
@@ -756,7 +811,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         NamespaceManager $nsManager,
         array &$records,
     ): void {
-        $deserId = $nsManager->resolve($id);
+        $deserId = $this->resolveQName($id, $nsManager);
 
         // hadMember prov:entity can be an array of entity references.
         if (
@@ -773,7 +828,12 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                 : $this->deserializeExtraAttributes($attrs, $nsManager) ?? Attributes::empty();
             $collection = $formal['prov:collection'] ?? null;
             foreach ($entities as $entityRef) {
-                $records[] = new Membership($deserId, $collection, $nsManager->resolve((string) $entityRef), $extra);
+                $records[] = new Membership(
+                    $deserId,
+                    $collection,
+                    $this->resolveQName((string) $entityRef, $nsManager),
+                    $extra,
+                );
             }
             return;
         }
@@ -957,7 +1017,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             } else {
                 // Identifier reference: pre-resolve so the downstream record
                 // constructor receives a QualifiedName directly.
-                $formal[$key] = $nsManager->resolve((string) $value);
+                $formal[$key] = $this->resolveQName((string) $value, $nsManager);
             }
             unset($attrs[$key]);
         }
@@ -983,7 +1043,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                     $key = is_array($rawKey) && isset($rawKey['$'])
                         ? $this->deserializeTypedValue($rawKey, $nsManager)
                         : $rawKey;
-                    $entity = is_string($entry['$']) ? $nsManager->resolve($entry['$']) : null;
+                    $entity = is_string($entry['$']) ? $this->resolveQName($entry['$'], $nsManager) : null;
                     $pairs[] = new DictionaryEntry($key, $entity);
                 }
             }
@@ -999,7 +1059,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             : null;
         $keyDatatype =
             $keyDatatypeRaw !== null && $keyDatatypeRaw !== 'xsd:string' && $keyDatatypeRaw !== 'prov:QUALIFIED_NAME'
-                ? $nsManager->resolve($keyDatatypeRaw)
+                ? $this->resolveQName($keyDatatypeRaw, $nsManager)
                 : null;
         $keysAsQn = $keyDatatypeRaw === 'prov:QUALIFIED_NAME';
 
@@ -1008,13 +1068,13 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                 continue;
             }
             if ($keysAsQn) {
-                $resolvedKey = $nsManager->resolve((string) $key);
+                $resolvedKey = $this->resolveQName((string) $key, $nsManager);
             } elseif ($keyDatatype !== null) {
                 $resolvedKey = new Literal((string) $key, $keyDatatype);
             } else {
                 $resolvedKey = $key;
             }
-            $entity = is_string($value) ? $nsManager->resolve($value) : null;
+            $entity = is_string($value) ? $this->resolveQName($value, $nsManager) : null;
             $pairs[] = new DictionaryEntry($resolvedKey, $entity);
         }
         return $pairs;
@@ -1038,7 +1098,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         $data = [];
         $keys = [];
         foreach ($attrs as $key => $value) {
-            $keyName = $nsManager->resolve($key);
+            $keyName = $this->resolveQName($key, $nsManager);
             $uri = $keyName->getUri();
             $keys[$uri] ??= $keyName;
             if (is_array($value) && isset($value['$'])) {
@@ -1098,10 +1158,10 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         // prov:QUALIFIED_NAME is the PROV-JSON-native tag; xsd:QName is the equivalent
         // from PROV-XML that some JSON fixtures emit. Both indicate a QualifiedName.
         if ($type === 'prov:QUALIFIED_NAME' || $type === 'xsd:QName') {
-            return $nsManager->resolve($lexical);
+            return $this->resolveQName($lexical, $nsManager);
         }
 
-        $datatype = $type !== null ? $nsManager->resolve($type) : null;
+        $datatype = $type !== null ? $this->resolveQName($type, $nsManager) : null;
         $lang = $value['lang'] ?? null;
         if ($lang !== null && !is_string($lang)) {
             throw new DeserializationException('Invalid PROV-JSON: typed value "lang" must be a string.');
