@@ -246,6 +246,31 @@ class RecordIndex
         return $this->invalidationsByEntity[$uri] ?? [];
     }
 
+    /**
+     * Entity URIs referenced by any generation, usage, or invalidation, whether
+     * or not the entity is declared. Drives the generation/usage/invalidation
+     * ordering checks (36/37/38) so referenced-but-undeclared entities are
+     * covered and each entity is examined exactly once.
+     *
+     * @return list<string>
+     */
+    public function getEntityUrisWithEvents(): array
+    {
+        return array_keys($this->generationsByEntity + $this->usagesByEntity + $this->invalidationsByEntity);
+    }
+
+    /**
+     * Activity URIs referenced by any start or end event, whether or not the
+     * activity is declared. Drives the start-precedes-end check (30) so
+     * referenced-but-undeclared activities are covered.
+     *
+     * @return list<string>
+     */
+    public function getActivityUrisWithEvents(): array
+    {
+        return array_keys($this->startsByActivity + $this->endsByActivity);
+    }
+
     /** @return list<\Prov\Relation\Start> */
     public function getStartsForActivity(string $uri): array
     {

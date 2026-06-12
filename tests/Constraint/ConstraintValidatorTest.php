@@ -12,6 +12,7 @@ use Prov\Constraint\ConstraintValidator;
 use Prov\Constraint\ConstraintViolationList;
 use Prov\Exception\ConstraintViolationException;
 use Prov\Identifier\ProvNamespace;
+use Prov\Relation\Dictionary\DictionaryEntry;
 use Prov\Serializer\JsonSerializer;
 
 final class ConstraintValidatorTest extends TestCase
@@ -181,6 +182,94 @@ final class ConstraintValidatorTest extends TestCase
             new \DateTimeImmutable('2023-12-31T00:00:00Z'),
         );
         $this->assertTrue($this->validate($b)->isValid());
+    }
+
+    public function testConstraint30StartEventAfterEndEventViaFallback(): void
+    {
+        // The activity carries no own times; the start/end event times are the
+        // only ordering evidence and they are out of order.
+        $b = $this->buildDoc();
+        $b->activity('ex:a1');
+        $b->wasStartedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $b->wasEndedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(30));
+    }
+
+    public function testConstraint30EveryStartMustPrecedeEveryEnd(): void
+    {
+        // start = mid, ends = [late, early]. The latest start (mid) follows the
+        // earliest end (early), which only max-vs-min catches; taking the first
+        // end (late) would miss it.
+        $b = $this->buildDoc();
+        $b->activity('ex:a1');
+        $b->wasStartedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $b->wasEndedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $b->wasEndedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(30));
+    }
+
+    public function testConstraint30IsStableUnderRecordReorder(): void
+    {
+        // The same end events in either order must produce the same violation.
+        $start = new \DateTimeImmutable('2023-06-01T00:00:00Z');
+        $lateEnd = new \DateTimeImmutable('2023-12-31T00:00:00Z');
+        $earlyEnd = new \DateTimeImmutable('2023-01-01T00:00:00Z');
+
+        $forward = $this->buildDoc();
+        $forward->activity('ex:a1');
+        $forward->wasStartedBy(activity: 'ex:a1', time: $start);
+        $forward->wasEndedBy(activity: 'ex:a1', time: $lateEnd);
+        $forward->wasEndedBy(activity: 'ex:a1', time: $earlyEnd);
+
+        $reversed = $this->buildDoc();
+        $reversed->activity('ex:a1');
+        $reversed->wasStartedBy(activity: 'ex:a1', time: $start);
+        $reversed->wasEndedBy(activity: 'ex:a1', time: $earlyEnd);
+        $reversed->wasEndedBy(activity: 'ex:a1', time: $lateEnd);
+
+        $this->assertCount(
+            count($this->validate($forward)->getViolationsByConstraint(30)),
+            $this->validate($reversed)->getViolationsByConstraint(30),
+        );
+    }
+
+    public function testConstraint30AnonymousActivityOwnTimes(): void
+    {
+        // An anonymous activity needs no index lookup: its own startTime and
+        // endTime are compared directly.
+        $b = $this->buildDoc();
+        $b->activity(
+            null,
+            new \DateTimeImmutable('2023-12-31T00:00:00Z'),
+            new \DateTimeImmutable('2023-01-01T00:00:00Z'),
+        );
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(30));
+    }
+
+    public function testConstraint30ReportsOnceForRestatedActivityDeclaration(): void
+    {
+        // Declaring the same activity twice must not double the violation count.
+        $b = $this->buildDoc();
+        $b->activity('ex:a1');
+        $b->activity('ex:a1');
+        $b->wasStartedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $b->wasEndedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(30));
+    }
+
+    public function testConstraint30ChecksUndeclaredActivity(): void
+    {
+        // ex:a1 is never declared, only referenced by its start and end events.
+        // Scruffy PROV still requires its start to precede its end.
+        $b = $this->buildDoc();
+        $b->wasStartedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $b->wasEndedBy(activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(30));
     }
 
     // --- Constraint 33: usage-within-activity ---
@@ -479,6 +568,84 @@ final class ConstraintValidatorTest extends TestCase
         $this->assertEmpty($v->getViolationsByConstraint(38));
     }
 
+    public function testConstraint36ChecksUndeclaredEntity(): void
+    {
+        // ex:e1 is never declared as an entity, only referenced by the events.
+        // Scruffy PROV still requires its generation to precede its invalidation.
+        $b = $this->buildDoc();
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a2', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(36));
+    }
+
+    public function testConstraint36ReportsOnceForRestatedEntityDeclaration(): void
+    {
+        // Declaring the same entity twice must not double the violation count.
+        $b = $this->buildDoc();
+        $b->entity('ex:e1');
+        $b->entity('ex:e1');
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a2', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(36));
+    }
+
+    public function testConstraint37ReportsOncePerEntityNotPerPair(): void
+    {
+        // Two generations after two usages would be four out-of-order pairs; the
+        // entity is reported exactly once rather than once per pair.
+        $b = $this->buildDoc();
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-12-30T00:00:00Z'));
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a2', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $b->used(activity: 'ex:a3', entity: 'ex:e1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->used(activity: 'ex:a4', entity: 'ex:e1', time: new \DateTimeImmutable('2023-01-02T00:00:00Z'));
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(37));
+    }
+
+    public function testConstraint36GenerationBeforeInvalidationIsValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a2', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $this->assertEmpty($this->validate($b)->getViolationsByConstraint(36));
+    }
+
+    public function testConstraint36SimultaneousGenerationAndInvalidationIsValid(): void
+    {
+        // Precedence allows simultaneity: a generation at the same instant as the
+        // invalidation is not "after" it.
+        $b = $this->buildDoc();
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a2', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $this->assertEmpty($this->validate($b)->getViolationsByConstraint(36));
+    }
+
+    public function testConstraint37GenerationBeforeUsageIsValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->used(activity: 'ex:a2', entity: 'ex:e1', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $this->assertEmpty($this->validate($b)->getViolationsByConstraint(37));
+    }
+
+    public function testConstraint37SimultaneousGenerationAndUsageIsValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $b->used(activity: 'ex:a2', entity: 'ex:e1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $this->assertEmpty($this->validate($b)->getViolationsByConstraint(37));
+    }
+
+    public function testConstraint38SimultaneousUsageAndInvalidationIsValid(): void
+    {
+        $b = $this->buildDoc();
+        $b->used(activity: 'ex:a1', entity: 'ex:e1', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a2', time: new \DateTimeImmutable('2023-06-01T00:00:00Z'));
+        $this->assertEmpty($this->validate($b)->getViolationsByConstraint(38));
+    }
+
     // --- Constraint 50: typing ---
 
     public function testConstraint50EntityAndActivityRolesInReferences(): void
@@ -513,6 +680,52 @@ final class ConstraintValidatorTest extends TestCase
         $v = $this->validate($b);
         $this->assertEmpty($v->getViolationsByConstraint(50));
         $this->assertCount(1, $v->getViolationsByConstraint(55));
+    }
+
+    public function testConstraint50InvalidationEntityClashesWithUsageActivity(): void
+    {
+        // ex:x is an entity in an invalidation and an activity in a usage: a
+        // clash the old instanceof set (which ignored invalidation) missed.
+        $b = $this->buildDoc();
+        $b->wasInvalidatedBy(entity: 'ex:x', activity: 'ex:a1');
+        $b->used(activity: 'ex:x', entity: 'ex:e2');
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(50));
+    }
+
+    public function testConstraint50StartTriggerEntityClashesWithStarterActivity(): void
+    {
+        // Within wasStartedBy the trigger is an entity and the starter is an
+        // activity, so reusing one identifier for both roles is a typing clash.
+        $b = $this->buildDoc();
+        $b->wasStartedBy(activity: 'ex:a1', trigger: 'ex:x', starter: 'ex:x');
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(50));
+    }
+
+    public function testConstraint50DerivationEntityClashesWithAssociationActivity(): void
+    {
+        // A derivation's generatedEntity is an entity; an association's activity
+        // is an activity. Neither was collected by the old instanceof set.
+        $b = $this->buildDoc();
+        $b->wasDerivedFrom(generatedEntity: 'ex:x', usedEntity: 'ex:e1');
+        $b->wasAssociatedWith(activity: 'ex:x', agent: 'ex:ag1');
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(50));
+    }
+
+    public function testConstraint50DictionaryEntryEntityClashesWithUsageActivity(): void
+    {
+        // A dictionary key-entity pair's member is an entity reference even
+        // though it lives in an array-typed formal outside TYPING_ROLES.
+        $b = $this->buildDoc();
+        $b->derivedByInsertionFrom(after: 'ex:d2', before: 'ex:d1', keyEntityPairs: [new DictionaryEntry(
+            'k',
+            $this->ex->qualifiedName('x'),
+        )]);
+        $b->used(activity: 'ex:x', entity: 'ex:e1');
+        $v = $this->validate($b);
+        $this->assertCount(1, $v->getViolationsByConstraint(50));
     }
 
     // --- Constraint 54: impossible-object-property-overlap ---

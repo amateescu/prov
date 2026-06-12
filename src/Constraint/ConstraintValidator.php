@@ -8,12 +8,9 @@ use Prov\Activity;
 use Prov\Agent;
 use Prov\Document;
 use Prov\Entity;
+use Prov\Identifier\QualifiedName;
 use Prov\Model\ProvRelation;
-use Prov\Relation\Association;
-use Prov\Relation\Attribution;
-use Prov\Relation\Communication;
-use Prov\Relation\Delegation;
-use Prov\Relation\Derivation;
+use Prov\Model\RelationMetadata;
 use Prov\Relation\End;
 use Prov\Relation\Generation;
 use Prov\Relation\Invalidation;
@@ -394,6 +391,9 @@ class ConstraintValidator
         if ($record->time !== null) {
             // Keyed per statement: restating one identified event is not a second
             // event, while every anonymous record counts as its own statement.
+            // The `??=` keeps the first time seen for a given id; reconciling two
+            // conflicting times under one id is constraint 23 (key properties),
+            // which this validator does not implement.
             $statementKey = $id ?? '_anon_' . spl_object_id($record);
             $groups[$pair]['times'][$statementKey] ??= $record->time->format('U.u');
         }
@@ -435,56 +435,44 @@ class ConstraintValidator
         foreach ($index->getRecords() as $record) {
             if ($record instanceof Entity && $record->identifier !== null) {
                 $roles[$record->identifier->getUri()]['entity'] = true;
-            }
-            if ($record instanceof Activity && $record->identifier !== null) {
+            } elseif ($record instanceof Activity && $record->identifier !== null) {
                 $roles[$record->identifier->getUri()]['activity'] = true;
-            }
-            if ($record instanceof Agent && $record->identifier !== null) {
+            } elseif ($record instanceof Agent && $record->identifier !== null) {
                 $roles[$record->identifier->getUri()]['agent'] = true;
-            }
-
-            // Check references in relations.
-            if ($record instanceof Generation) {
-                if ($record->entity !== null) {
-                    $roles[$record->entity->getUri()]['entity'] = true;
+            } elseif ($record instanceof ProvRelation) {
+                // Every typed reference position contributes its element role,
+                // driven by the metadata table so each relation is covered.
+                $rolesByProp = RelationMetadata::TYPING_ROLES[$record::class] ?? [];
+                /** @var array<string, \Prov\Identifier\QualifiedName|\DateTimeImmutable|list<mixed>|null> $formals */
+                $formals = RelationMetadata::extractFormals($record);
+                foreach ($rolesByProp as $prop => $role) {
+                    $reference = $formals[$prop] ?? null;
+                    if ($reference instanceof QualifiedName) {
+                        $roles[$reference->getUri()][$role] = true;
+                    }
                 }
-                if ($record->activity !== null) {
-                    $roles[$record->activity->getUri()]['activity'] = true;
-                }
-            } elseif ($record instanceof Usage) {
-                if ($record->activity !== null) {
-                    $roles[$record->activity->getUri()]['activity'] = true;
-                }
-                if ($record->entity !== null) {
-                    $roles[$record->entity->getUri()]['entity'] = true;
-                }
-            } elseif ($record instanceof Communication) {
-                if ($record->informed !== null) {
-                    $roles[$record->informed->getUri()]['activity'] = true;
-                }
-                if ($record->informant !== null) {
-                    $roles[$record->informant->getUri()]['activity'] = true;
-                }
-            }
-            // Agent references from attribution, association, delegation.
-            if ($record instanceof Attribution && $record->agent !== null) {
-                $roles[$record->agent->getUri()]['agent'] = true;
-            }
-            if ($record instanceof Association && $record->agent !== null) {
-                $roles[$record->agent->getUri()]['agent'] = true;
-            }
-            if ($record instanceof Delegation) {
-                if ($record->delegate !== null) {
-                    $roles[$record->delegate->getUri()]['agent'] = true;
-                }
-                if ($record->responsible !== null) {
-                    $roles[$record->responsible->getUri()]['agent'] = true;
+                // Dictionary key-entity pairs reference entities through an
+                // array-typed formal, which the per-property role table cannot
+                // express; the member entities are entity-role references too.
+                foreach ($formals as $prop => $value) {
+                    if ($prop !== 'keyEntityPairs' || !is_array($value)) {
+                        continue;
+                    }
+                    /** @var list<\Prov\Relation\Dictionary\DictionaryEntry> $pairs */
+                    $pairs = $value;
+                    foreach ($pairs as $entry) {
+                        if ($entry->entity !== null) {
+                            $roles[$entry->entity->getUri()]['entity'] = true;
+                        }
+                    }
                 }
             }
         }
 
-        // Check for conflicts: entity vs activity is caught by constraint 55.
-        // Here we just check entity-vs-activity in reference contexts.
+        // Entity and activity are the only disjoint roles; agent overlaps both
+        // legitimately. An identifier declared as both is skipped here (that
+        // clash is constraint 55's); the conflict is flagged when at least one
+        // of the two roles comes from a relation reference.
         foreach ($roles as $uri => $typeSet) {
             if (!isset($typeSet['entity'], $typeSet['activity'])) {
                 continue;
@@ -556,36 +544,60 @@ class ConstraintValidator
     /** Constraint 30: Start must precede end for the same activity. */
     private function checkConstraint30(RecordIndex $index, ConstraintViolationList $violations): void
     {
+        // Own times are aggregated per URI first, so a restated activity is
+        // checked (and reported) once, with every declaration's times folded
+        // in. An anonymous activity is its own statement: only its own
+        // startTime and endTime can order it, checked inline.
+        /** @var array<string, array{starts: list<\DateTimeImmutable>, ends: list<\DateTimeImmutable>}> $ownTimes */
+        $ownTimes = [];
         foreach ($index->getActivities() as $record) {
-            $identifier = $record->identifier;
-            if ($identifier === null) {
+            $uri = $record->identifier?->getUri();
+            if ($uri === null) {
+                if ($record->startTime !== null && $record->endTime !== null && $record->startTime > $record->endTime) {
+                    $violations->add(new ConstraintViolation(
+                        ConstraintId::StartPrecedesEnd,
+                        "Activity '' start time is after its end time.",
+                        null,
+                    ));
+                }
                 continue;
             }
-            $uri = $identifier->getUri();
+            $ownTimes[$uri] ??= ['starts' => [], 'ends' => []];
+            if ($record->startTime !== null) {
+                $ownTimes[$uri]['starts'][] = $record->startTime;
+            }
+            if ($record->endTime !== null) {
+                $ownTimes[$uri]['ends'][] = $record->endTime;
+            }
+        }
 
-            // Use activity's own times if available.
-            $startTime = $record->startTime;
-            $endTime = $record->endTime;
+        // A referenced-but-undeclared activity is still ordered by its start
+        // and end events (scruffy PROV), mirroring the 36/37/38 scope.
+        foreach ($index->getActivityUrisWithEvents() as $uri) {
+            $ownTimes[$uri] ??= ['starts' => [], 'ends' => []];
+        }
 
-            // Also check start/end event times.
-            if ($startTime === null) {
-                foreach ($index->getStartsForActivity($uri) as $start) {
-                    if ($start->time !== null) {
-                        $startTime = $start->time;
-                        break;
-                    }
+        foreach ($ownTimes as $uri => $times) {
+            $startTimes = $times['starts'];
+            $endTimes = $times['ends'];
+            foreach ($index->getStartsForActivity($uri) as $start) {
+                if ($start->time !== null) {
+                    $startTimes[] = $start->time;
                 }
             }
-            if ($endTime === null) {
-                foreach ($index->getEndsForActivity($uri) as $end) {
-                    if ($end->time !== null) {
-                        $endTime = $end->time;
-                        break;
-                    }
+            foreach ($index->getEndsForActivity($uri) as $end) {
+                if ($end->time !== null) {
+                    $endTimes[] = $end->time;
                 }
             }
 
-            if ($startTime !== null && $endTime !== null && $startTime > $endTime) {
+            if ($startTimes === [] || $endTimes === []) {
+                continue;
+            }
+
+            // Every start must precede every end, so the latest start may not
+            // follow the earliest end, independent of record order.
+            if (max($startTimes) > min($endTimes)) {
                 $violations->add(
                     new ConstraintViolation(
                         ConstraintId::StartPrecedesEnd,
@@ -664,30 +676,20 @@ class ConstraintValidator
     /** Constraint 36: Generation must precede invalidation for the same entity. */
     private function checkConstraint36(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getEntities() as $record) {
-            $identifier = $record->identifier;
-            if ($identifier === null) {
+        foreach ($index->getEntityUrisWithEvents() as $uri) {
+            $gens = $this->eventTimes($index->getGenerationsForEntity($uri));
+            $invs = $this->eventTimes($index->getInvalidationsForEntity($uri));
+            if ($gens === [] || $invs === []) {
                 continue;
             }
-            $uri = $identifier->getUri();
-            $gens = $index->getGenerationsForEntity($uri);
-            $invs = $index->getInvalidationsForEntity($uri);
-
-            foreach ($gens as $gen) {
-                if ($gen->time === null) {
-                    continue;
-                }
-                foreach ($invs as $inv) {
-                    if ($inv->time !== null && $gen->time > $inv->time) {
-                        $violations->add(
-                            new ConstraintViolation(
-                                ConstraintId::GenerationPrecedesInvalidation,
-                                "Entity '{$uri}' generation time is after its invalidation time.",
-                                $uri,
-                            ),
-                        );
-                    }
-                }
+            if (max($gens) > min($invs)) {
+                $violations->add(
+                    new ConstraintViolation(
+                        ConstraintId::GenerationPrecedesInvalidation,
+                        "Entity '{$uri}' generation time is after its invalidation time.",
+                        $uri,
+                    ),
+                );
             }
         }
     }
@@ -695,30 +697,20 @@ class ConstraintValidator
     /** Constraint 37: Generation must precede usage for the same entity. */
     private function checkConstraint37(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getEntities() as $record) {
-            $identifier = $record->identifier;
-            if ($identifier === null) {
+        foreach ($index->getEntityUrisWithEvents() as $uri) {
+            $gens = $this->eventTimes($index->getGenerationsForEntity($uri));
+            $usages = $this->eventTimes($index->getUsagesForEntity($uri));
+            if ($gens === [] || $usages === []) {
                 continue;
             }
-            $uri = $identifier->getUri();
-            $gens = $index->getGenerationsForEntity($uri);
-            $usages = $index->getUsagesForEntity($uri);
-
-            foreach ($gens as $gen) {
-                if ($gen->time === null) {
-                    continue;
-                }
-                foreach ($usages as $use) {
-                    if ($use->time !== null && $gen->time > $use->time) {
-                        $violations->add(
-                            new ConstraintViolation(
-                                ConstraintId::GenerationPrecedesUsage,
-                                "Entity '{$uri}' generation time is after a usage time.",
-                                $uri,
-                            ),
-                        );
-                    }
-                }
+            if (max($gens) > min($usages)) {
+                $violations->add(
+                    new ConstraintViolation(
+                        ConstraintId::GenerationPrecedesUsage,
+                        "Entity '{$uri}' generation time is after a usage time.",
+                        $uri,
+                    ),
+                );
             }
         }
     }
@@ -726,32 +718,41 @@ class ConstraintValidator
     /** Constraint 38: Usage must precede invalidation for the same entity. */
     private function checkConstraint38(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getEntities() as $record) {
-            $identifier = $record->identifier;
-            if ($identifier === null) {
+        foreach ($index->getEntityUrisWithEvents() as $uri) {
+            $usages = $this->eventTimes($index->getUsagesForEntity($uri));
+            $invs = $this->eventTimes($index->getInvalidationsForEntity($uri));
+            if ($usages === [] || $invs === []) {
                 continue;
             }
-            $uri = $identifier->getUri();
-            $usages = $index->getUsagesForEntity($uri);
-            $invs = $index->getInvalidationsForEntity($uri);
-
-            foreach ($usages as $use) {
-                if ($use->time === null) {
-                    continue;
-                }
-                foreach ($invs as $inv) {
-                    if ($inv->time !== null && $use->time > $inv->time) {
-                        $violations->add(
-                            new ConstraintViolation(
-                                ConstraintId::UsagePrecedesInvalidation,
-                                "Entity '{$uri}' usage time is after its invalidation time.",
-                                $uri,
-                            ),
-                        );
-                    }
-                }
+            if (max($usages) > min($invs)) {
+                $violations->add(
+                    new ConstraintViolation(
+                        ConstraintId::UsagePrecedesInvalidation,
+                        "Entity '{$uri}' usage time is after its invalidation time.",
+                        $uri,
+                    ),
+                );
             }
         }
+    }
+
+    /**
+     * Collects the non-null event times from a list of generation, usage, or
+     * invalidation records, for the max-vs-min ordering comparisons.
+     *
+     * @param list<\Prov\Relation\Generation|\Prov\Relation\Usage|\Prov\Relation\Invalidation> $events
+     *
+     * @return list<\DateTimeImmutable>
+     */
+    private function eventTimes(array $events): array
+    {
+        $times = [];
+        foreach ($events as $event) {
+            if ($event->time !== null) {
+                $times[] = $event->time;
+            }
+        }
+        return $times;
     }
 
     /**
@@ -782,6 +783,9 @@ class ConstraintValidator
                     continue;
                 }
                 $genId = $gen->identifier?->getUri() ?? '_anon_' . spl_object_id($gen);
+                // Last write wins for a restated id: reconciling conflicting
+                // times under one id is constraint 23 (key properties), which
+                // this validator does not implement.
                 $timesByGenId[$genId] = $gen->time->format('U.u');
             }
 
@@ -821,6 +825,9 @@ class ConstraintValidator
                     continue;
                 }
                 $invId = $inv->identifier?->getUri() ?? '_anon_' . spl_object_id($inv);
+                // Last write wins for a restated id: reconciling conflicting
+                // times under one id is constraint 23 (key properties), which
+                // this validator does not implement.
                 $timesByInvId[$invId] = $inv->time->format('U.u');
             }
 
