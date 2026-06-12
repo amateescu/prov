@@ -61,7 +61,7 @@ class JsonLdSerializer implements ProvSerializerInterface
             }
 
             $bundleNode = [
-                '@id' => (string) $bundle->identifier,
+                '@id' => $this->jsonLdId($bundle->identifier),
                 '@type' => 'prov:Bundle',
                 '@graph' => $this->buildGraph($bundle->records, $bundleNsManager),
             ];
@@ -79,7 +79,7 @@ class JsonLdSerializer implements ProvSerializerInterface
             $output['@graph'] = $graph;
         }
 
-        $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR;
+        $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION;
         if ($this->prettyPrint) {
             $flags |= JSON_PRETTY_PRINT;
         }
@@ -134,7 +134,7 @@ class JsonLdSerializer implements ProvSerializerInterface
         // First pass: create nodes for all elements.
         foreach ($records as $record) {
             if ($record instanceof ProvElement && $record->identifier !== null) {
-                $id = (string) $record->identifier;
+                $id = $this->jsonLdId($record->identifier);
                 if (!isset($nodes[$id])) {
                     $nodes[$id] = ['@id' => $id];
                 }
@@ -202,7 +202,7 @@ class JsonLdSerializer implements ProvSerializerInterface
         if (!$subject instanceof QualifiedName) {
             return;
         }
-        $subjectId = (string) $subject;
+        $subjectId = $this->jsonLdId($subject);
         $this->ensureNode($nodes, $subjectId);
 
         $properties = $spec['properties'];
@@ -246,7 +246,7 @@ class JsonLdSerializer implements ProvSerializerInterface
     /** @param array<string, array<string, mixed>> $nodes */
     private function attachMention(Mention $men, array &$nodes): void
     {
-        $subjectId = $men->specificEntity !== null ? (string) $men->specificEntity : null;
+        $subjectId = $men->specificEntity !== null ? $this->jsonLdId($men->specificEntity) : null;
         $general = $men->generalEntity;
         if ($subjectId === null || $general === null) {
             return;
@@ -271,7 +271,7 @@ class JsonLdSerializer implements ProvSerializerInterface
     {
         $node = ['@type' => $type];
         if ($relation->identifier !== null) {
-            $node['@id'] = (string) $relation->identifier;
+            $node['@id'] = $this->jsonLdId($relation->identifier);
         }
         $this->addAttributes($node, $relation->attributes, $nsManager);
         return $node;
@@ -290,6 +290,11 @@ class JsonLdSerializer implements ProvSerializerInterface
             $key = $this->minter !== null
                 ? $this->minter->uriToPrefixed($uri, $nsManager)
                 : $nsManager->uriToPrefixed($uri);
+            // The reserved `default:` prefix is never written; the bare local
+            // term expands against the context's `@vocab` (the default namespace).
+            if (str_starts_with($key, 'default:')) {
+                $key = substr($key, strlen('default:'));
+            }
             foreach ($values as $value) {
                 $this->appendProperty($node, $key, $this->serializeValue($value));
             }
@@ -324,11 +329,22 @@ class JsonLdSerializer implements ProvSerializerInterface
     }
 
     /**
+     * The IRI to write for an identifier. JSON-LD resolves a relative `@id`
+     * against the document base (not `@vocab`), so a default-namespace
+     * identifier is emitted as its full URI; the reserved `default:` prefix is
+     * never written. Prefixed names expand against their `@context` entry.
+     */
+    private function jsonLdId(QualifiedName $qn): string
+    {
+        return $qn->namespace->prefix === 'default' ? $qn->getUri() : (string) $qn;
+    }
+
+    /**
      * @return array{'@id': string}
      */
     private function idRef(QualifiedName $qn): array
     {
-        return ['@id' => (string) $qn];
+        return ['@id' => $this->jsonLdId($qn)];
     }
 
     /**
@@ -345,13 +361,13 @@ class JsonLdSerializer implements ProvSerializerInterface
     private function serializeValue(QualifiedName|Literal|string|int|float|bool $value): mixed
     {
         if ($value instanceof QualifiedName) {
-            return ['@id' => (string) $value];
+            return ['@id' => $this->jsonLdId($value)];
         }
 
         if ($value instanceof Literal) {
             $result = ['@value' => $value->value];
             if ($value->datatype !== null) {
-                $result['@type'] = (string) $value->datatype;
+                $result['@type'] = $this->jsonLdId($value->datatype);
             }
             if ($value->languageTag !== null) {
                 $result['@language'] = $value->languageTag;

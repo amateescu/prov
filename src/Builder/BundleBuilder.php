@@ -19,8 +19,12 @@ class BundleBuilder extends RecordBuilder
     public function __construct(
         private QualifiedName $identifier,
         ?NamespaceManager $namespaceManager = null,
+        ?RecordBuilder $blankNodeScope = null,
     ) {
         $this->namespaceManager = $namespaceManager ?? new NamespaceManager();
+        if ($blankNodeScope !== null) {
+            $this->shareBlankNodeScope($blankNodeScope);
+        }
     }
 
     /**

@@ -62,6 +62,11 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
 
     private ?PrefixMinter $minter = null;
 
+    private ?NamespaceManager $documentManager = null;
+
+    /** URI of the document-level default namespace, or null if none is declared. */
+    private ?string $documentDefaultUri = null;
+
     // ============================================================
     // Serialization
     // ============================================================
@@ -75,6 +80,10 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     #[\NoDiscard]
     public function serialize(Document $document): string
     {
+        // Per-document state; a reused serializer instance must not carry the
+        // previous document's default namespace into one that declares none.
+        $this->documentDefaultUri = null;
+
         $dom = new \DOMDocument('1.0', 'UTF-8');
         $dom->formatOutput = $this->prettyPrint;
 
@@ -94,6 +103,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                 // PROV's "default" namespace is the XML default namespace.
                 $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns', $ns->uri);
                 $nsManager->setDefault($ns);
+                $this->documentDefaultUri = $ns->uri;
                 continue;
             }
             $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:' . $ns->prefix, $ns->uri);
@@ -101,7 +111,9 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         }
         // Minted namespaces need no root declaration: createElementNS declares
         // them on the elements that use them.
-        $this->minter = new PrefixMinter($nsManager);
+        $this->documentManager = $nsManager;
+        $minter = new PrefixMinter($nsManager);
+        $this->minter = $minter;
 
         foreach ($document->records as $record) {
             $this->serializeRecord($dom, $root, $record, $nsManager);
@@ -109,6 +121,13 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
 
         foreach ($document->bundles as $bundle) {
             $this->serializeBundle($dom, $root, $bundle, $nsManager);
+        }
+
+        // Namespaces minted for an identifier written as a prov:id/prov:ref
+        // string (e.g. a bundle-local default routed through a real prefix) have
+        // no element to carry their declaration, so declare them on the root.
+        foreach ($minter->getMintedNamespaces() as $ns) {
+            $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:' . $ns->prefix, $ns->uri);
         }
 
         $xml = $dom->saveXML();
@@ -144,7 +163,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     ): void {
         $el = $dom->createElementNS(self::PROV_NS, 'prov:' . $tagName);
         if ($record->identifier !== null) {
-            $el->setAttributeNS(self::PROV_NS, 'prov:id', (string) $record->identifier);
+            $el->setAttributeNS(self::PROV_NS, 'prov:id', $this->xmlIdentifier($record->identifier));
         }
         $this->serializeAttributes($dom, $el, $record->attributes, $nsManager);
         $parent->appendChild($el);
@@ -158,7 +177,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     ): void {
         $el = $dom->createElementNS(self::PROV_NS, 'prov:activity');
         if ($record->identifier !== null) {
-            $el->setAttributeNS(self::PROV_NS, 'prov:id', (string) $record->identifier);
+            $el->setAttributeNS(self::PROV_NS, 'prov:id', $this->xmlIdentifier($record->identifier));
         }
         if ($record->startTime !== null) {
             $el->appendChild($dom->createElementNS(
@@ -191,7 +210,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
 
         $el = $dom->createElementNS(self::PROV_NS, 'prov:' . $tagName);
         if ($record->identifier !== null) {
-            $el->setAttributeNS(self::PROV_NS, 'prov:id', (string) $record->identifier);
+            $el->setAttributeNS(self::PROV_NS, 'prov:id', $this->xmlIdentifier($record->identifier));
         }
 
         $this->serializeRelationFormals($dom, $el, $record);
@@ -205,7 +224,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                 $kep->appendChild($keyEl);
                 if ($pair->entity !== null) {
                     $entityEl = $dom->createElementNS(self::PROV_NS, 'prov:entity');
-                    $entityEl->setAttributeNS(self::PROV_NS, 'prov:ref', (string) $pair->entity);
+                    $entityEl->setAttributeNS(self::PROV_NS, 'prov:ref', $this->xmlIdentifier($pair->entity));
                     $kep->appendChild($entityEl);
                 }
                 $el->appendChild($kep);
@@ -223,20 +242,49 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $parent->appendChild($el);
     }
 
+    /**
+     * The QName string to write for an identifier (prov:id, prov:ref, or an
+     * xsd:QName value). A real prefix is written verbatim. A default-namespace
+     * identifier is written as a bare local part only when it lives in the
+     * document's default namespace (bound by the root xmlns); one from another
+     * scope (e.g. a bundle-local default) is routed through a real declared or
+     * minted prefix, so it never relies on an element-level default xmlns,
+     * which libxml's namespace reconciliation can drop.
+     */
+    private function xmlIdentifier(QualifiedName $qn): string
+    {
+        if ($qn->namespace->prefix !== 'default') {
+            return (string) $qn;
+        }
+        if ($this->documentDefaultUri !== null && $qn->namespace->uri === $this->documentDefaultUri) {
+            return $qn->localPart;
+        }
+        if ($this->minter !== null && $this->documentManager !== null) {
+            return $this->minter->uriToPrefixed($qn->getUri(), $this->documentManager);
+        }
+        return $qn->localPart;
+    }
+
     private function setTypedTextContent(\DOMElement $el, mixed $value, NamespaceManager $nsManager): void
     {
         if ($value instanceof QualifiedName) {
             $el->setAttributeNS(self::XSI_NS, 'xsi:type', 'xsd:QName');
-            $declaredNs = $nsManager->getNamespace($value->namespace->prefix);
-            if ($declaredNs === null || $declaredNs->uri !== $value->namespace->uri) {
-                $el->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns', $value->namespace->uri);
-                $el->textContent = $value->localPart;
+            if ($value->namespace->prefix === 'default') {
+                // The reserved default prefix is never written; xmlIdentifier
+                // yields a bare local part (document default) or a real prefix.
+                $el->textContent = $this->xmlIdentifier($value);
             } else {
-                $el->textContent = (string) $value;
+                $declaredNs = $nsManager->getNamespace($value->namespace->prefix);
+                if ($declaredNs === null || $declaredNs->uri !== $value->namespace->uri) {
+                    $el->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns', $value->namespace->uri);
+                    $el->textContent = $value->localPart;
+                } else {
+                    $el->textContent = (string) $value;
+                }
             }
         } elseif ($value instanceof Literal) {
             if ($value->datatype !== null) {
-                $el->setAttributeNS(self::XSI_NS, 'xsi:type', (string) $value->datatype);
+                $el->setAttributeNS(self::XSI_NS, 'xsi:type', $this->xmlIdentifier($value->datatype));
             }
             if ($value->languageTag !== null) {
                 $el->setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', $value->languageTag);
@@ -280,7 +328,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         foreach ($refProps as $childName => $value) {
             if ($value instanceof QualifiedName) {
                 $child = $dom->createElementNS(self::PROV_NS, 'prov:' . $childName);
-                $child->setAttributeNS(self::PROV_NS, 'prov:ref', (string) $value);
+                $child->setAttributeNS(self::PROV_NS, 'prov:ref', $this->xmlIdentifier($value));
                 $el->appendChild($child);
             } elseif ($value instanceof \DateTimeImmutable) {
                 $el->appendChild($dom->createElementNS(
@@ -351,13 +399,22 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             if (count($parts) === 2) {
                 $local = $parts[1];
                 if ($local !== '' && ctype_digit($local[0])) {
-                    $prefixedKey = $parts[0] . ':_' . $local;
+                    $local = '_' . $local;
+                    $prefixedKey = $parts[0] . ':' . $local;
                 }
-                $ns = $nsManager->getNamespace($parts[0]);
-                if ($ns !== null) {
-                    $el = $dom->createElementNS($ns->uri, $prefixedKey);
+                if ($parts[0] === 'default') {
+                    // Default-namespace key: an unprefixed element bound to the
+                    // default namespace; the reserved 'default' prefix is never written.
+                    $ns = $nsManager->getNamespace('default');
+                    $el = $ns !== null ? $dom->createElementNS($ns->uri, $local) : $dom->createElement($local);
+                    $prefixedKey = $local;
                 } else {
-                    $el = $dom->createElement($prefixedKey);
+                    $ns = $nsManager->getNamespace($parts[0]);
+                    if ($ns !== null) {
+                        $el = $dom->createElementNS($ns->uri, $prefixedKey);
+                    } else {
+                        $el = $dom->createElement($prefixedKey);
+                    }
                 }
             } else {
                 if ($prefixedKey !== '' && ctype_digit($prefixedKey[0])) {
@@ -380,7 +437,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             if ($value->languageTag !== null) {
                 $el->setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', $value->languageTag);
             } elseif ($value->datatype !== null) {
-                $el->setAttributeNS(self::XSI_NS, 'xsi:type', (string) $value->datatype);
+                $el->setAttributeNS(self::XSI_NS, 'xsi:type', $this->xmlIdentifier($value->datatype));
             }
             $this->writeLiteralValue($el, $value);
         } elseif (is_bool($value)) {
@@ -406,7 +463,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         NamespaceManager $nsManager,
     ): void {
         $el = $dom->createElementNS(self::PROV_NS, 'prov:bundleContent');
-        $el->setAttributeNS(self::PROV_NS, 'prov:id', (string) $bundle->identifier);
+        $el->setAttributeNS(self::PROV_NS, 'prov:id', $this->xmlIdentifier($bundle->identifier));
 
         // Bundle-level declarations become xmlns attributes on the
         // bundleContent element, mirroring how the deserializer reads them
@@ -415,9 +472,11 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         // are written as plain attributes (not namespace-declaration nodes):
         // libxml's namespace reconciliation drops a declaration node whose URI
         // is already in scope under another prefix, but these declarations are
-        // load-bearing for the prefixed prov:id strings inside the bundle. The
-        // library's reserved 'default' prefix is declared by its literal name,
-        // matching how the ids reference it (e.g. prov:id="default:e001").
+        // load-bearing for the prefixed prov:id strings inside the bundle. A
+        // bundle-local default namespace gets no xmlns declaration here: its
+        // identifiers are written through a real prefix (xmlIdentifier), so the
+        // bundleContent default stays the document's, keeping the bundle's own
+        // prov:id (which lives in the parent scope) resolvable as a bare name.
         $bundleNsManager = new NamespaceManager($nsManager);
         foreach ($bundle->namespaces as $ns) {
             $existing = $nsManager->getNamespace($ns->prefix);
@@ -425,7 +484,6 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                 continue;
             }
             if ($ns->prefix === 'default') {
-                $el->setAttribute('xmlns:default', $ns->uri);
                 $bundleNsManager->setDefault($ns);
                 continue;
             }
@@ -584,9 +642,9 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                 continue;
             }
             if ($child->localName === 'startTime') {
-                $startTime = new \DateTimeImmutable($child->textContent);
+                $startTime = $this->parseDateTime($child->textContent);
             } elseif ($child->localName === 'endTime') {
-                $endTime = new \DateTimeImmutable($child->textContent);
+                $endTime = $this->parseDateTime($child->textContent);
             }
         }
 
@@ -650,7 +708,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                         $nsManager,
                     ));
                 } elseif ($childLocalName === 'time') {
-                    $formals[$formalMap[$childLocalName]] = new \DateTimeImmutable($child->textContent);
+                    $formals[$formalMap[$childLocalName]] = $this->parseDateTime($child->textContent);
                 }
             }
         }
@@ -852,6 +910,19 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     }
 
     // --- Helpers ---
+
+    /**
+     * Parses an xsd:dateTime element value, surfacing any malformed value as a
+     * DeserializationException rather than a leaked \DateMalformedStringException.
+     */
+    private function parseDateTime(string $value): \DateTimeImmutable
+    {
+        try {
+            return new \DateTimeImmutable($value);
+        } catch (\DateException $e) {
+            throw new DeserializationException("Invalid PROV-XML: malformed dateTime '{$value}'.", previous: $e);
+        }
+    }
 
     private function getProvId(\DOMElement $el): ?string
     {

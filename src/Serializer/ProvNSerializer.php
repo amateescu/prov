@@ -365,7 +365,7 @@ class ProvNSerializer implements ProvSerializerInterface
                 "Identifier '{$qn}' contains a character that cannot be represented in PROV-N.",
             );
         }
-        return (string) $qn;
+        return $qn->getSerializedForm();
     }
 
     private function formatOptionalId(?QualifiedName $id): string
@@ -384,6 +384,12 @@ class ProvNSerializer implements ProvSerializerInterface
             $key = $this->minter !== null
                 ? $this->minter->uriToPrefixed($uri, $nsManager)
                 : $nsManager->uriToPrefixed($uri);
+            // A default-namespace key prefixes as the reserved "default:" sentinel,
+            // which must never be written; emit the bare local name instead, which
+            // resolves against the document's `default <uri>` declaration.
+            if (str_starts_with($key, 'default:')) {
+                $key = substr($key, strlen('default:'));
+            }
             $this->assertSafeAttributeKey($key);
             foreach ($values as $value) {
                 $formattedValue = $this->formatAttributeValue($value);

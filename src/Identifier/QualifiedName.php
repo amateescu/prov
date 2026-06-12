@@ -52,6 +52,19 @@ readonly class QualifiedName implements \Stringable
     }
 
     /**
+     * The form to write in prefixed serialization formats (PROV-N, PROV-JSON,
+     * PROV-XML): the `prefix:local` short form, except for an identifier in the
+     * default namespace, where the bare local part is written. The reserved
+     * `default` prefix is an internal sentinel and must never appear literally
+     * in output; the bare local part resolves against the format's default
+     * namespace declaration instead.
+     */
+    public function getSerializedForm(): string
+    {
+        return $this->namespace->prefix === 'default' ? $this->localPart : $this->stringForm;
+    }
+
+    /**
      * Whether this identifier is a blank node: an anonymous record label in
      * the reserved `_:` pseudo-namespace rather than a resolvable URI. Blank
      * labels are document-scoped; only their links matter, not their names.

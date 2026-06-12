@@ -41,6 +41,7 @@ class DocumentBuilder extends RecordBuilder
         $bundleBuilder = new BundleBuilder(
             $this->resolveBundleIdentifier($identifier),
             new NamespaceManager($this->namespaceManager),
+            $this,
         );
         $this->bundleBuilders[] = $bundleBuilder;
         return $bundleBuilder;
@@ -56,6 +57,7 @@ class DocumentBuilder extends RecordBuilder
         $bundleBuilder = new BundleBuilder(
             $this->resolveBundleIdentifier($identifier),
             new NamespaceManager($this->namespaceManager),
+            $this,
         );
         $callback($bundleBuilder);
         if ($this->keepUnusedNamespaces) {
