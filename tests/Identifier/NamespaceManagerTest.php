@@ -284,6 +284,91 @@ final class NamespaceManagerTest extends TestCase
         $manager->add(new ProvNamespace('prov', 'http://b.example/'));
     }
 
+    public function testResolveFullUrnMatchesRegisteredNamespace(): void
+    {
+        // A URN namespace has no '//' authority, so the input "looks" prefixed.
+        // resolve() must match it against the registered namespace URI rather
+        // than treating "urn" as a prefix.
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('node', 'urn:uuid:abc#node/'));
+
+        $qn = $manager->resolve('urn:uuid:abc#node/42');
+        $this->assertSame('urn:uuid:abc#node/42', $qn->uri);
+        $this->assertSame('node', $qn->namespace->prefix);
+        $this->assertSame('42', $qn->localPart);
+    }
+
+    public function testResolvePrefersRegisteredPrefixOverUriMatch(): void
+    {
+        // When the leading segment is itself a registered prefix, the prefixed
+        // reading wins over treating the whole string as a URI.
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('urn', 'http://urn.example/'));
+
+        $qn = $manager->resolve('urn:foo');
+        $this->assertSame('http://urn.example/foo', $qn->uri);
+    }
+
+    public function testResolveUnregisteredPrefixWithNoUriMatchThrows(): void
+    {
+        $manager = new NamespaceManager();
+
+        $this->expectException(NamespaceException::class);
+        $this->expectExceptionMessage("Prefix 'urn' is not registered");
+        $manager->resolve('urn:uuid:abc');
+    }
+
+    public function testResolveUriAcceptsSlashInLocalPart(): void
+    {
+        // Versioned identifiers (id/rev/version) live under a single namespace.
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('node', 'http://example.org/node/'));
+
+        $qn = $manager->resolveUri('http://example.org/node/42/rev/7');
+        $this->assertNotNull($qn);
+        $this->assertSame('node', $qn->namespace->prefix);
+        $this->assertSame('42/rev/7', $qn->localPart);
+    }
+
+    public function testResolveUriAcceptsFragmentInLocalPart(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('site', 'urn:uuid:abc'));
+
+        $qn = $manager->resolveUri('urn:uuid:abc#node/42');
+        $this->assertNotNull($qn);
+        $this->assertSame('#node/42', $qn->localPart);
+    }
+
+    public function testResolveUriPrefersLongestNamespace(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('a', 'http://example.org/'));
+        $manager->add(new ProvNamespace('b', 'http://example.org/sub/'));
+
+        $qn = $manager->resolveUri('http://example.org/sub/x');
+        $this->assertNotNull($qn);
+        $this->assertSame('b', $qn->namespace->prefix);
+        $this->assertSame('x', $qn->localPart);
+    }
+
+    public function testUriToPrefixedPrefersLongestNamespace(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('a', 'http://example.org/'));
+        $manager->add(new ProvNamespace('b', 'http://example.org/sub/'));
+
+        $this->assertSame('b:x', $manager->uriToPrefixed('http://example.org/sub/x'));
+    }
+
+    public function testUriToPrefixedKeepsSlashInLocalPart(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->add(new ProvNamespace('node', 'http://example.org/node/'));
+
+        $this->assertSame('node:42/rev/7', $manager->uriToPrefixed('http://example.org/node/42/rev/7'));
+    }
+
     public function testChildCanIndependentlyOverrideBuiltinAlreadyOverriddenByParent(): void
     {
         // A bundle-scoped NamespaceManager has its own fresh builtin tracking, so

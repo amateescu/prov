@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Prov\Builder\DocumentBuilder;
 use Prov\Document;
 use Prov\Entity;
-use Prov\Exception\NamespaceException;
+use Prov\Identifier\ProvNamespace;
 use Prov\Operation\ProvGraph;
 use Prov\Relation\Association;
 use Prov\Relation\Derivation;
@@ -48,6 +48,33 @@ final class ProvGraphTest extends TestCase
 
         $this->assertInstanceOf(Generation::class, $graph->recordByIdentifier('ex:gen1'));
         $this->assertNull($graph->recordByIdentifier('ex:missing'));
+    }
+
+    public function testRecordByIdentifierResolvesFullUrn(): void
+    {
+        // A record under a URN namespace must be reachable by its full URN,
+        // even though "urn:..." has no '//' authority and superficially looks
+        // like a prefixed shorthand.
+        $builder = new DocumentBuilder();
+        $builder->addNamespace(ProvNamespace::urnUuid('node', 'abcdef12-3456-7890-abcd-ef1234567890', 'node/'));
+        $builder->entity('node:42');
+        $graph = new ProvGraph($builder->build());
+
+        $uri = 'urn:uuid:abcdef12-3456-7890-abcd-ef1234567890#node/42';
+        $record = $graph->recordByIdentifier($uri);
+        $this->assertInstanceOf(Entity::class, $record);
+        $this->assertSame($uri, $record->identifier?->getUri());
+    }
+
+    public function testRecordByIdentifierResolvesVersionedSlashLocalPart(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('node', 'http://example.org/node/');
+        $builder->entity('http://example.org/node/42/rev/7');
+        $graph = new ProvGraph($builder->build());
+
+        $record = $graph->recordByIdentifier('http://example.org/node/42/rev/7');
+        $this->assertInstanceOf(Entity::class, $record);
     }
 
     public function testRelationsFromMatchesSubject(): void
@@ -126,12 +153,16 @@ final class ProvGraphTest extends TestCase
         $this->assertSame($byQn, $byUri);
     }
 
-    public function testUnknownPrefixThrows(): void
+    public function testUnresolvableIdentifiersMissGracefully(): void
     {
+        // An identifier that resolves against no declared namespace can name
+        // nothing in the index, so every lookup spelling misses the same way
+        // an unknown authority-form URI does, instead of throwing.
         $graph = new ProvGraph($this->buildDocument());
 
-        $this->expectException(NamespaceException::class);
-        $graph->relationsFrom('nope:article');
+        $this->assertSame([], $graph->relationsFrom('nope:article'));
+        $this->assertNull($graph->recordByIdentifier('urn:uuid:00000000-0000-0000-0000-000000000000#node/1'));
+        $this->assertNull($graph->recordByIdentifier('http://unknown.example/article'));
     }
 
     public function testBlankNodeEndpoints(): void

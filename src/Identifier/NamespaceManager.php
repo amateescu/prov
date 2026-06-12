@@ -122,10 +122,20 @@ class NamespaceManager
         if (str_contains($shorthand, ':')) {
             [$prefix, $localPart] = explode(':', $shorthand, 2);
             $ns = $this->getNamespace($prefix);
-            if ($ns === null) {
-                throw new NamespaceException("Prefix '{$prefix}' is not registered.");
+            if ($ns !== null) {
+                return $this->resolveCache[$shorthand] = $ns->qualifiedName($localPart);
             }
-            return $this->resolveCache[$shorthand] = $ns->qualifiedName($localPart);
+            // The leading segment is not a registered prefix, so the input may
+            // itself be a full URI in a scheme without '//' (urn:, tag:,
+            // mailto:, ...). Match it against registered namespace URIs before
+            // giving up.
+            $resolved = $this->resolveUri($shorthand);
+            if ($resolved !== null) {
+                return $this->resolveCache[$shorthand] = $resolved;
+            }
+            throw new NamespaceException(
+                "Prefix '{$prefix}' is not registered and no namespace URI matches '{$shorthand}'.",
+            );
         }
 
         $default = $this->getDefault();
@@ -138,22 +148,31 @@ class NamespaceManager
 
     /**
      * Attempts to resolve a full URI against registered namespaces.
+     *
+     * The most specific (longest URI) namespace wins, so a URI under a nested
+     * namespace (`http://e/sub/`) is not mis-split against its parent
+     * (`http://e/`). Once the matching namespace is fixed, the remaining local
+     * part is accepted even when it contains `/` or `#`, so versioned
+     * identifiers (`42/rev/7`) and fragment-relative names resolve.
      */
     public function resolveUri(string $uri): ?QualifiedName
     {
-        foreach ($this->getAllNamespaces() as $ns) {
-            if (str_starts_with($uri, $ns->uri) && $uri !== $ns->uri) {
+        foreach ($this->namespacesByUriLengthDesc() as $ns) {
+            if ($uri !== $ns->uri && str_starts_with($uri, $ns->uri)) {
                 $localPart = substr($uri, strlen($ns->uri));
-                if ($localPart !== '' && !str_contains($localPart, '/') && !str_contains($localPart, '#')) {
+                if ($localPart !== '') {
                     return $ns->qualifiedName($localPart);
                 }
             }
         }
-        return $this->parent?->resolveUri($uri);
+        return null;
     }
 
     /**
-     * Converts a full URI to a prefixed string (e.g. "prov:type"), or returns the URI as-is.
+     * Converts a full URI to a prefixed string (e.g. "prov:type"), or returns
+     * the URI as-is. Uses the same longest-match-first semantics as
+     * `resolveUri()`, so the most specific namespace supplies the prefix and
+     * the remaining local part may contain `/` or `#`.
      */
     public function uriToPrefixed(string $uri): string
     {
@@ -161,13 +180,29 @@ class NamespaceManager
             return $this->uriToPrefixedCache[$uri];
         }
 
-        foreach ($this->getAllNamespaces() as $ns) {
-            if (str_starts_with($uri, $ns->uri) && $uri !== $ns->uri) {
+        foreach ($this->namespacesByUriLengthDesc() as $ns) {
+            if ($uri !== $ns->uri && str_starts_with($uri, $ns->uri)) {
                 $localPart = substr($uri, strlen($ns->uri));
-                return $this->uriToPrefixedCache[$uri] = $ns->prefix . ':' . $localPart;
+                if ($localPart !== '') {
+                    return $this->uriToPrefixedCache[$uri] = $ns->prefix . ':' . $localPart;
+                }
             }
         }
         return $this->uriToPrefixedCache[$uri] = $uri;
+    }
+
+    /**
+     * Every visible namespace (this manager's own plus any inherited from the
+     * parent), ordered by URI length descending so the most specific namespace
+     * is tried first when matching a URI.
+     *
+     * @return list<\Prov\Identifier\ProvNamespace>
+     */
+    private function namespacesByUriLengthDesc(): array
+    {
+        $namespaces = array_values($this->getAllNamespaces());
+        usort($namespaces, static fn(ProvNamespace $a, ProvNamespace $b): int => strlen($b->uri) <=> strlen($a->uri));
+        return $namespaces;
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Prov\Operation;
 
 use Prov\Bundle;
 use Prov\Document;
+use Prov\Exception\NamespaceException;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\ProvRecord;
@@ -24,6 +25,9 @@ use Prov\Relation\Usage;
  * construction, so lookups are O(1) in the number of records. Identifiers
  * can be passed as QualifiedName objects, as `prefix:local` shorthands
  * (resolved against the container's declared namespaces), or as full URIs.
+ * An identifier that cannot be resolved against any declared namespace can
+ * name nothing in the index, so lookups miss (null or an empty list) rather
+ * than throw, regardless of the identifier's spelling.
  *
  * Every relation has a subject (its first endpoint in PROV-N positional
  * order: the entity for `wasGeneratedBy`, the activity for `used`, ...) and
@@ -222,12 +226,23 @@ final class ProvGraph
         if ($identifier instanceof QualifiedName) {
             return $identifier->getUri();
         }
-        // Full URIs and blank-node labels are already in index form; only
-        // prefixed or unprefixed shorthands need namespace resolution.
+        // URIs with an authority component and blank-node labels are already in
+        // index form.
         if (str_contains($identifier, '://') || str_starts_with($identifier, '_:')) {
             return $identifier;
         }
-        return $this->nsManager->resolve($identifier)->getUri();
+        // A prefixed or unprefixed shorthand resolves against the container's
+        // namespaces. A full URI in a scheme without '//' (urn:, tag:, ...)
+        // falls through to resolve(), which matches it against registered
+        // namespace URIs, so an in-graph URN still maps to its index key. An
+        // unresolvable reference cannot name anything in the index, so it is
+        // used as-is and the lookup misses, mirroring how an unknown
+        // authority-form URI behaves above.
+        try {
+            return $this->nsManager->resolve($identifier)->getUri();
+        } catch (NamespaceException) {
+            return $identifier;
+        }
     }
 
     /**
