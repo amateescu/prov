@@ -211,7 +211,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
         $this->keyword('endBundle');
 
         $bundles[] = new Bundle(
-            identifier: $nsManager->resolve($id),
+            identifier: $this->resolveQName($id, $nsManager),
             records: $bundleRecords,
             namespaces: $childNs->getRegisteredNamespaces(),
         );
@@ -244,7 +244,10 @@ class ProvNDeserializer implements ProvDeserializerInterface
         } else {
             $this->pos++;
         }
-        $records[] = new Entity($id !== null ? $nsManager->resolve($id) : null, $attrs ?? Attributes::empty());
+        $records[] = new Entity(
+            $id !== null ? $this->resolveQName($id, $nsManager) : null,
+            $attrs ?? Attributes::empty(),
+        );
     }
 
     /**
@@ -284,7 +287,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
 
         $this->expect(')');
         $records[] = new Activity(
-            $id !== null ? $nsManager->resolve($id) : null,
+            $id !== null ? $this->resolveQName($id, $nsManager) : null,
             $startTime,
             $endTime,
             $attrs ?? Attributes::empty(),
@@ -316,7 +319,10 @@ class ProvNDeserializer implements ProvDeserializerInterface
         } else {
             $this->pos++;
         }
-        $records[] = new Agent($id !== null ? $nsManager->resolve($id) : null, $attrs ?? Attributes::empty());
+        $records[] = new Agent(
+            $id !== null ? $this->resolveQName($id, $nsManager) : null,
+            $attrs ?? Attributes::empty(),
+        );
     }
 
     // --- Relations ---
@@ -451,12 +457,12 @@ class ProvNDeserializer implements ProvDeserializerInterface
     {
         [$id, $args, $attrs] = $p;
 
-        $idQn = $id !== null ? $nsManager->resolve($id) : null;
+        $idQn = $id !== null ? $this->resolveQName($id, $nsManager) : null;
         $attrs ??= Attributes::empty();
 
         // Positional args are mixed: strings for identifiers, DateTimeImmutable for times.
-        $resolve = static fn(int $i): ?QualifiedName => isset($args[$i]) && is_string($args[$i])
-            ? $nsManager->resolve($args[$i])
+        $resolve = fn(int $i): ?QualifiedName => isset($args[$i]) && is_string($args[$i])
+            ? $this->resolveQName($args[$i], $nsManager)
             : null;
         $q0 = $resolve(0);
         $q1 = $resolve(1);
@@ -521,7 +527,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
         $this->expect(',');
         $this->skip();
         $entity = $this->readOptionalId();
-        $entity = $entity !== null ? $nsManager->resolve($entity) : null;
+        $entity = $entity !== null ? $this->resolveQName($entity, $nsManager) : null;
         $this->skip();
         $this->expect(',');
         $this->skip();
@@ -529,7 +535,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
 
         $records[] = new DictionaryMembership(
             null,
-            $dictionary !== null ? $nsManager->resolve($dictionary) : null,
+            $dictionary !== null ? $this->resolveQName($dictionary, $nsManager) : null,
             [new DictionaryEntry($key, $entity)],
             Attributes::empty(),
         );
@@ -577,9 +583,9 @@ class ProvNDeserializer implements ProvDeserializerInterface
         }
 
         $records[] = new DictionaryInsertion(
-            $id !== null ? $nsManager->resolve($id) : null,
-            $after !== null ? $nsManager->resolve($after) : null,
-            $before !== null ? $nsManager->resolve($before) : null,
+            $id !== null ? $this->resolveQName($id, $nsManager) : null,
+            $after !== null ? $this->resolveQName($after, $nsManager) : null,
+            $before !== null ? $this->resolveQName($before, $nsManager) : null,
             $pairs,
             $attrs ?? Attributes::empty(),
         );
@@ -627,9 +633,9 @@ class ProvNDeserializer implements ProvDeserializerInterface
         }
 
         $records[] = new DictionaryRemoval(
-            $id !== null ? $nsManager->resolve($id) : null,
-            $after !== null ? $nsManager->resolve($after) : null,
-            $before !== null ? $nsManager->resolve($before) : null,
+            $id !== null ? $this->resolveQName($id, $nsManager) : null,
+            $after !== null ? $this->resolveQName($after, $nsManager) : null,
+            $before !== null ? $this->resolveQName($before, $nsManager) : null,
             $keys,
             $attrs ?? Attributes::empty(),
         );
@@ -658,7 +664,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
             $this->skip();
             $this->expect(',');
             $this->skip();
-            $entity = $nsManager->resolve($this->readQName());
+            $entity = $this->resolveQName($this->readQName(), $nsManager);
             $this->skip();
             $this->expect(')');
 
@@ -728,7 +734,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
         while (true) {
             $this->skip();
             $keyStr = $this->readQName();
-            $key = $nsManager->resolve($keyStr);
+            $key = $this->resolveQName($keyStr, $nsManager);
 
             $this->expect('=');
 
@@ -766,7 +772,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
                 if ($this->pos >= $this->len || $this->input[$this->pos] === "'") {
                     break;
                 }
-                // Preserve the backslash escape verbatim; resolve() decodes it.
+                // Preserve the backslash escape verbatim; resolveQName() decodes it.
                 if (($this->pos + 1) < $this->len) {
                     $result .= $this->input[$this->pos] . $this->input[$this->pos + 1];
                     $this->pos += 2;
@@ -776,7 +782,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
                 }
             }
             $this->advance(); // closing '
-            return $nsManager->resolve($result);
+            return $this->resolveQName($result, $nsManager);
         }
 
         // Triple-quoted string: """..."""
@@ -853,7 +859,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
             $this->pos += 2;
             $this->skip();
             $typeStr = $this->readQName();
-            $datatype = $nsManager->resolve($typeStr);
+            $datatype = $this->resolveQName($typeStr, $nsManager);
             return new Literal($str, datatype: $datatype);
         }
 
@@ -886,8 +892,11 @@ class ProvNDeserializer implements ProvDeserializerInterface
                     'n' => "\n",
                     'r' => "\r",
                     't' => "\t",
+                    'b' => "\x08",
+                    'f' => "\x0c",
                     '\\' => '\\',
                     '"' => '"',
+                    "'" => "'",
                     default => '\\' . $esc,
                 };
                 $this->pos += 2;
@@ -951,7 +960,10 @@ class ProvNDeserializer implements ProvDeserializerInterface
     private const string WORD_CHARS_EXT = self::WORD_CHARS . '-.';
     // ASCII subset of the QName character class; non-ASCII bytes (>= 128) and
     // backslash-escapes are handled as a slow-path fallback after each strspn.
-    private const string QNAME_ASCII = self::WORD_CHARS_EXT . ':/?~#';
+    // Covers the grammar's PN_CHARS_OTHERS set (`/ @ ~ & + * ? # $ !` plus
+    // percent-encoding); `@` is unambiguous here because a language tag only
+    // follows a string literal, never a bare qualified name.
+    private const string QNAME_ASCII = self::WORD_CHARS_EXT . ':/?~#@&+*$!%';
 
     private function peekWord(): string
     {
@@ -991,6 +1003,21 @@ class ProvNDeserializer implements ProvDeserializerInterface
             break;
         }
         return substr($this->input, $s, $this->pos - $s);
+    }
+
+    /**
+     * Resolves a raw qualified-name token (which may carry backslash escapes in
+     * its local part) to a QualifiedName, decoding the escapes so the result
+     * matches the same name parsed from a format that needs no escaping.
+     */
+    private function resolveQName(string $raw, NamespaceManager $nsManager): QualifiedName
+    {
+        $qn = $nsManager->resolve($raw);
+        $decoded = QualifiedNameEscaper::decode($qn->localPart);
+        if ($decoded === $qn->localPart) {
+            return $qn;
+        }
+        return new QualifiedName($qn->namespace, $decoded);
     }
 
     private function readIri(): string

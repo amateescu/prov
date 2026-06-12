@@ -354,18 +354,65 @@ class ProvNSerializer implements ProvSerializerInterface
     }
 
     /**
-     * Stringifies an identifier for emission, rejecting any that PROV-N cannot represent.
-     * This is the single chokepoint through which every qualified name reaches the output,
-     * so validation happens inline as the document is written (no separate pass).
+     * Stringifies an identifier for emission, escaping the local-name punctuation
+     * the grammar permits when backslash-escaped and rejecting any character that
+     * remains unrepresentable. This is the single chokepoint through which every
+     * qualified name reaches the output, so validation happens inline as the
+     * document is written (no separate pass).
      */
     private function formatQualifiedName(QualifiedName $qn): string
     {
-        if ($this->hasUnsafeChars($qn->namespace->prefix) || $this->hasUnsafeChars($qn->localPart)) {
+        $local = $this->escapeLocalPart($qn->localPart);
+
+        // A default-namespace name is written bare; a blank-node label keeps its
+        // reserved "_" prefix. Neither needs (or can take) a declaration.
+        if ($qn->namespace->prefix === 'default') {
+            return $local;
+        }
+        if ($qn->isBlank()) {
+            return $qn->namespace->prefix . ':' . $local;
+        }
+
+        // Route through the minter so an otherwise-undeclared namespace gets a
+        // declaration emitted in the header, keeping the output parseable.
+        $prefix = $this->minter !== null ? $this->minter->prefixFor($qn) : $qn->namespace->prefix;
+
+        // PN_PREFIX has no escape mechanism, so an unsafe prefix is unrepresentable.
+        if ($this->hasUnsafeChars($prefix)) {
             throw new \InvalidArgumentException(
-                "Identifier '{$qn}' contains a character that cannot be represented in PROV-N.",
+                "Identifier '{$qn}' has a prefix that cannot be represented in PROV-N.",
             );
         }
-        return $qn->getSerializedForm();
+
+        return $prefix . ':' . $local;
+    }
+
+    /**
+     * Backslash-escapes `PN_CHARS_ESC` punctuation in a local name, rejecting
+     * any character that has no escape in the grammar.
+     */
+    private function escapeLocalPart(string $local): string
+    {
+        $escaped = QualifiedNameEscaper::escape($local);
+        if ($this->hasUnsafeChars($escaped)) {
+            throw new \InvalidArgumentException(
+                "Local name '{$local}' contains a character that cannot be represented in PROV-N.",
+            );
+        }
+        return $escaped;
+    }
+
+    /**
+     * Escapes the local part of a `prefix:local` (or bare-local) attribute key,
+     * leaving the prefix untouched.
+     */
+    private function escapeAttributeKey(string $key): string
+    {
+        $colon = strpos($key, ':');
+        if ($colon === false) {
+            return $this->escapeLocalPart($key);
+        }
+        return substr($key, 0, $colon + 1) . $this->escapeLocalPart(substr($key, $colon + 1));
     }
 
     private function formatOptionalId(?QualifiedName $id): string
@@ -390,6 +437,7 @@ class ProvNSerializer implements ProvSerializerInterface
             if (str_starts_with($key, 'default:')) {
                 $key = substr($key, strlen('default:'));
             }
+            $key = $this->escapeAttributeKey($key);
             $this->assertSafeAttributeKey($key);
             foreach ($values as $value) {
                 $formattedValue = $this->formatAttributeValue($value);
