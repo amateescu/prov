@@ -5,10 +5,19 @@ declare(strict_types=1);
 namespace Prov\Tests\Operation;
 
 use PHPUnit\Framework\TestCase;
+use Prov\Attribute\Literal;
 use Prov\Builder\DocumentBuilder;
+use Prov\Entity;
 use Prov\Exception\NamespaceException;
+use Prov\Format;
 use Prov\Identifier\ProvNamespace;
+use Prov\Identifier\QualifiedName;
+use Prov\Operation\DocumentComparator;
 use Prov\Operation\DocumentOperations;
+use Prov\Operation\ProvGraph;
+use Prov\Prov;
+use Prov\Relation\Dictionary\DictionaryEntry;
+use Prov\Relation\Dictionary\DictionaryInsertion;
 use Prov\Relation\Generation;
 
 final class DocumentOperationsTest extends TestCase
@@ -251,5 +260,151 @@ final class DocumentOperationsTest extends TestCase
 
         $this->expectException(NamespaceException::class);
         DocumentOperations::merge($docA, $docB);
+    }
+
+    // --- Flatten: prefix conflicts and blank nodes (review items 1.3, 1.4) ---
+
+    public function testFlattenReMintsConflictingBundlePrefix(): void
+    {
+        $exB = new ProvNamespace('ex', 'http://example.org/b/');
+
+        // The document already uses both `ex` and `ex1`, so re-minting the
+        // bundle's conflicting `ex` has to step past `ex1` to `ex2`.
+        $builder = new DocumentBuilder();
+        $builder->addNamespace(new ProvNamespace('ex', 'http://example.org/a/'));
+        $builder->addNamespace(new ProvNamespace('ex1', 'http://example.org/c/'));
+        $builder->entity('ex:e1');
+        $bb = $builder->bundle('ex:b1');
+        $bb->addNamespace($exB);
+        // Exercise every QualifiedName-bearing slot in the conflicting namespace
+        // so the rewrite covers identifiers, attribute keys, QualifiedName and
+        // typed-literal values, and dictionary keys.
+        $bb->entity('ex:e2', [
+            'ex:tag' => $exB->qualifiedName('ref'),
+            'ex:typed' => new Literal('v', $exB->qualifiedName('myType')),
+        ]);
+        $bb->derivedByInsertionFrom(after: 'ex:e2', before: 'ex:e1', keyEntityPairs: [new DictionaryEntry(
+            $exB->qualifiedName('k'),
+            $exB->qualifiedName('e2'),
+        )]);
+        // A blank-node reference: its namespace is never in the canonical map,
+        // so the rewrite must leave it untouched.
+        $bb->wasGeneratedBy(entity: $bb->blank(), activity: 'ex:e2');
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        // No prefix is declared twice with conflicting URIs.
+        $byPrefix = [];
+        foreach ($flat->namespaces as $ns) {
+            $this->assertArrayNotHasKey(
+                $ns->prefix,
+                $byPrefix,
+                "Prefix '{$ns->prefix}' is declared more than once after flatten",
+            );
+            $byPrefix[$ns->prefix] = $ns->uri;
+        }
+
+        // The rewritten records keep their original URIs across every slot: the
+        // bundle entity's identifier, its attribute key and QualifiedName value,
+        // its typed-literal datatype, and the dictionary entry's key and entity.
+        $graph = new ProvGraph($flat);
+        $this->assertNotNull($graph->recordByIdentifier('http://example.org/a/e1'));
+        $entity = $graph->recordByIdentifier('http://example.org/b/e2');
+        $this->assertInstanceOf(Entity::class, $entity);
+
+        $tagKey = new ProvNamespace('ex', 'http://example.org/b/')->qualifiedName('tag');
+        $this->assertSame('http://example.org/b/ref', $entity->attributes->getQualifiedNames($tagKey)[0]?->getUri());
+        $typedKey = new ProvNamespace('ex', 'http://example.org/b/')->qualifiedName('typed');
+        $this->assertSame(
+            'http://example.org/b/myType',
+            $entity->attributes->getLiterals($typedKey)[0]?->datatype?->getUri(),
+        );
+
+        $insertion = null;
+        foreach ($flat->records as $record) {
+            if ($record instanceof DictionaryInsertion) {
+                $insertion = $record;
+            }
+        }
+        $this->assertInstanceOf(DictionaryInsertion::class, $insertion);
+        $entry = $insertion->keyEntityPairs[0];
+        $this->assertInstanceOf(QualifiedName::class, $entry->key);
+        $this->assertSame('http://example.org/b/k', $entry->key->getUri());
+        $this->assertSame('http://example.org/b/e2', $entry->entity?->getUri());
+
+        // The flattened document is graph-constructible and serializable.
+        new ProvGraph($flat);
+        foreach ([Format::Json, Format::ProvN, Format::Xml] as $format) {
+            $roundTripped = Prov::deserialize(Prov::serialize($flat, $format), $format);
+            $this->assertTrue(
+                DocumentComparator::equals($flat, $roundTripped),
+                "Flattened document with a re-minted prefix drifted via {$format->name}",
+            );
+        }
+    }
+
+    public function testFlattenNormalizesAliasPrefixesOntoTheCanonicalNamespace(): void
+    {
+        // `a2` (document level) and `b` (bundle level) are aliases: extra
+        // prefixes for the URI canonically declared as `a`. Flatten keeps one
+        // declaration per URI, so the records referencing an alias must be
+        // rewritten onto the canonical prefix or serialization would emit
+        // prefixed names with no matching declaration.
+        $builder = new DocumentBuilder();
+        $builder->addNamespace(new ProvNamespace('a', 'http://example.org/'));
+        $builder->addNamespace(new ProvNamespace('a2', 'http://example.org/'));
+        $builder->entity('a2:e1');
+        $bb = $builder->bundle('a:b1');
+        $bb->addNamespace(new ProvNamespace('b', 'http://example.org/'));
+        $bb->entity('b:e2');
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $declared = [];
+        foreach ($flat->namespaces as $ns) {
+            if ($ns->uri === 'http://example.org/') {
+                $declared[] = $ns->prefix;
+            }
+        }
+        $this->assertSame(['a'], $declared, 'Expected a single canonical declaration for the aliased URI');
+
+        foreach ($flat->records as $record) {
+            $id = $record->identifier;
+            if ($id !== null && !$id->isBlank()) {
+                $this->assertSame(
+                    'a',
+                    $id->namespace->prefix,
+                    "Record '{$id}' was not rewritten onto the canonical prefix",
+                );
+            }
+        }
+
+        $roundTripped = Prov::deserialize(Prov::serialize($flat, Format::ProvN), Format::ProvN);
+        $this->assertTrue(
+            DocumentComparator::equals($flat, $roundTripped),
+            'Flattened document with normalized alias prefixes drifted via PROV-N',
+        );
+    }
+
+    public function testFlattenKeepsDocumentAndBundleBlankNodesDistinct(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->addNamespace(new ProvNamespace('ex', 'http://example.org/'));
+        $builder->entity($builder->blank());
+        $builder->withBundle('ex:b1', static function ($bundle): void {
+            $bundle->entity($bundle->blank());
+        });
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $blankUris = [];
+        foreach ($flat->records as $record) {
+            if ($record->identifier !== null && $record->identifier->isBlank()) {
+                $blankUris[] = $record->identifier->getUri();
+            }
+        }
+
+        $this->assertCount(2, $blankUris, 'Expected one blank node from the document and one from the bundle');
+        $this->assertCount(2, array_unique($blankUris), 'Document and bundle blank-node labels collided after flatten');
     }
 }

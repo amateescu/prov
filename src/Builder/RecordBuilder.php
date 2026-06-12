@@ -85,16 +85,37 @@ abstract class RecordBuilder
     private int $blankNodeCounter = 0;
 
     /**
+     * When set, blank-node minting delegates here instead of using this
+     * builder's own counter, so a document and its bundles draw from one
+     * sequence. Blank labels are container-scoped, but `flatten()` lifts bundle
+     * records to document level without renaming, so independent counters would
+     * mint colliding `_:bN` labels for unrelated anonymous records.
+     */
+    private ?RecordBuilder $blankNodeScope = null;
+
+    /**
      * Mints a fresh blank-node identifier (e.g. `_:b1`). Capture the return
      * value when creating an anonymous record so you can refer to the same
      * node in later calls.
      */
     public function blank(): QualifiedName
     {
+        if ($this->blankNodeScope !== null) {
+            return $this->blankNodeScope->blank();
+        }
         return new QualifiedName(
             new ProvNamespace(self::BLANK_PREFIX, self::BLANK_URI),
             'b' . ++$this->blankNodeCounter,
         );
+    }
+
+    /**
+     * Routes this builder's blank-node minting through `$scope`, so nested
+     * builders (a bundle inside a document) share one label sequence.
+     */
+    protected function shareBlankNodeScope(RecordBuilder $scope): void
+    {
+        $this->blankNodeScope = $scope;
     }
 
     protected function markBuilt(): void

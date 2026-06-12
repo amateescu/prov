@@ -33,7 +33,20 @@ final class SerializerRoundTripPropertyTest extends TestCase
     private const int DEFAULT_ITERATIONS = 100;
     private const int DEFAULT_SEED = 20_260_611;
 
-    private const array IDS = ['ex:e1', 'ex:e2', 'ex:e3', 'ex:a1', 'ex:a2', 'ex:ag1', 'ex:plan1', '_:b1', '_:b2'];
+    private const array IDS = [
+        'ex:e1',
+        'ex:e2',
+        'ex:e3',
+        'ex:a1',
+        'ex:a2',
+        'ex:ag1',
+        'ex:plan1',
+        '_:b1',
+        '_:b2',
+        // Unprefixed identifiers resolve against the document default namespace.
+        'd1',
+        'd2',
+    ];
 
     private const array TIMES = [null, '2024-01-15T10:00:00Z', '2024-06-01T08:30:00.123456+02:00'];
 
@@ -168,7 +181,14 @@ final class SerializerRoundTripPropertyTest extends TestCase
         $ex = new ProvNamespace('ex', 'http://example.org/');
         return match ($index) {
             1 => ['ex:tag' => 'plain string'],
-            2 => ['ex:count' => 42, 'ex:rate' => 1.5, 'ex:flag' => true],
+            2 => [
+                'ex:count' => 42,
+                'ex:rate' => 1.5,
+                'ex:flag' => true,
+                'ex:whole' => 2.0,
+                'ex:negative' => -7,
+                'ex:negfloat' => -2.5,
+            ],
             3 => ['ex:tags' => ['first', 'second']],
             4 => ['prov:type' => 'ex:Widget'],
             5 => ['prov:label' => new Literal('hallo', null, 'de')],
@@ -186,7 +206,9 @@ final class SerializerRoundTripPropertyTest extends TestCase
     /** @param list<array<string, mixed>> $specs */
     private function buildDoc(array $specs): Document
     {
-        $b = new DocumentBuilder()->addNamespace(new ProvNamespace('ex', 'http://example.org/'));
+        $b = new DocumentBuilder()
+            ->addNamespace(new ProvNamespace('ex', 'http://example.org/'))
+            ->setDefaultNamespace(new ProvNamespace('default', 'http://default.example/'));
         foreach ($specs as $spec) {
             $attrs = $this->attrsFor($spec['attrs'] ?? 0);
             match ($spec['type']) {
