@@ -71,6 +71,39 @@ final class RelationMetadata
     ];
 
     /**
+     * Maps relation class names to the element role each formal reference must
+     * have, as `property => 'entity'|'activity'|'agent'`. Drives the PROV-CONSTRAINTS
+     * typing check (constraint 50): a referenced identifier acquires the role its
+     * position dictates, and an identifier used in two incompatible roles is a
+     * typing violation. Only positions with a fixed element type appear; event
+     * references (a derivation's generation/usage), bundle references, and the
+     * polymorphic influencee/influencer of Influence carry no role and are omitted.
+     * Dictionary key-entity pairs live in an array-typed formal this table cannot
+     * express; the validator walks their member entities separately.
+     *
+     * @var array<class-string<\Prov\Model\ProvRelation>, array<string, 'entity'|'activity'|'agent'>>
+     */
+    public const array TYPING_ROLES = [
+        Generation::class => ['entity' => 'entity', 'activity' => 'activity'],
+        Usage::class => ['activity' => 'activity', 'entity' => 'entity'],
+        Communication::class => ['informed' => 'activity', 'informant' => 'activity'],
+        Start::class => ['activity' => 'activity', 'trigger' => 'entity', 'starter' => 'activity'],
+        End::class => ['activity' => 'activity', 'trigger' => 'entity', 'ender' => 'activity'],
+        Invalidation::class => ['entity' => 'entity', 'activity' => 'activity'],
+        Derivation::class => ['generatedEntity' => 'entity', 'usedEntity' => 'entity', 'activity' => 'activity'],
+        Attribution::class => ['entity' => 'entity', 'agent' => 'agent'],
+        Association::class => ['activity' => 'activity', 'agent' => 'agent', 'plan' => 'entity'],
+        Delegation::class => ['delegate' => 'agent', 'responsible' => 'agent', 'activity' => 'activity'],
+        Specialization::class => ['specificEntity' => 'entity', 'generalEntity' => 'entity'],
+        Alternate::class => ['alternate1' => 'entity', 'alternate2' => 'entity'],
+        Membership::class => ['collection' => 'entity', 'entity' => 'entity'],
+        Mention::class => ['specificEntity' => 'entity', 'generalEntity' => 'entity'],
+        DictionaryMembership::class => ['dictionary' => 'entity'],
+        DictionaryInsertion::class => ['after' => 'entity', 'before' => 'entity'],
+        DictionaryRemoval::class => ['after' => 'entity', 'before' => 'entity'],
+    ];
+
+    /**
      * Maps relation class names to their PROV-JSON key names.
      *
      * @var array<class-string<\Prov\Model\ProvRelation>, string>
