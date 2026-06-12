@@ -47,6 +47,30 @@ final class DocumentBuilderTest extends TestCase
         $this->assertSame([], $doc->bundles);
     }
 
+    public function testNamespaceWithDefaultPrefixSetsDefaultNamespace(): void
+    {
+        // namespace('default', ...) must set the default namespace so
+        // unprefixed identifiers resolve, matching how the read side treats the
+        // 'default' prefix. A plain registration would leave entity('foo')
+        // unresolvable.
+        $doc = new DocumentBuilder()
+            ->namespace('default', 'http://default.example/')
+            ->entity('foo')
+            ->build();
+
+        $this->assertSame('http://default.example/foo', $doc->entities[0]->identifier->uri);
+    }
+
+    public function testAddNamespaceWithDefaultPrefixSetsDefaultNamespace(): void
+    {
+        $doc = new DocumentBuilder()
+            ->addNamespace(new ProvNamespace('default', 'http://default.example/'))
+            ->entity('foo')
+            ->build();
+
+        $this->assertSame('http://default.example/foo', $doc->entities[0]->identifier->uri);
+    }
+
     public function testEntityWithStringShorthand(): void
     {
         $this->builder->entity('ex:e1');

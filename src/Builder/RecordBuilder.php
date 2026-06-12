@@ -128,11 +128,18 @@ abstract class RecordBuilder
     }
 
     /**
-     * Registers a namespace.
+     * Registers a namespace. The reserved `default` prefix is routed to
+     * `setDefaultNamespace()` so the builder and the read side (`ProvGraph`,
+     * which treats the `default` prefix as the default namespace) agree; a
+     * plain registration would leave unprefixed identifiers unresolvable.
      */
     public function addNamespace(ProvNamespace $ns): static
     {
-        $this->namespaceManager->add($ns);
+        if ($ns->prefix === 'default') {
+            $this->namespaceManager->setDefault($ns);
+        } else {
+            $this->namespaceManager->add($ns);
+        }
         return $this;
     }
 
@@ -145,7 +152,7 @@ abstract class RecordBuilder
     public function addNamespaces(iterable $namespaces): static
     {
         foreach ($namespaces as $ns) {
-            $this->namespaceManager->add($ns);
+            $this->addNamespace($ns);
         }
         return $this;
     }
@@ -167,8 +174,7 @@ abstract class RecordBuilder
      */
     public function namespace(string $prefix, string $uri): static
     {
-        $this->namespaceManager->add(new ProvNamespace($prefix, $uri));
-        return $this;
+        return $this->addNamespace(new ProvNamespace($prefix, $uri));
     }
 
     /**

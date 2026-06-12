@@ -237,6 +237,62 @@ final class AttributesTest extends TestCase
         $this->assertSame('http://example.org/ns#label', $keys[0]->getUri());
     }
 
+    public function testKeysDerivedFromSlashOnlyUri(): void
+    {
+        $attrs = new Attributes(['http://example.org/ns/label' => ['x']]);
+
+        $keys = $attrs->keys();
+        $this->assertCount(1, $keys);
+        $this->assertSame('label', $keys[0]->localPart);
+        $this->assertSame('http://example.org/ns/', $keys[0]->namespace->uri);
+    }
+
+    public function testKeysDerivedFromOpaqueColonOnlyIri(): void
+    {
+        // An opaque IRI (urn:, tag:, ...) has neither '#' nor '/', so the key
+        // splits at the last ':' rather than crashing on an empty namespace.
+        $attrs = new Attributes(['urn:uuid:1234' => ['x']]);
+
+        $keys = $attrs->keys();
+        $this->assertCount(1, $keys);
+        $this->assertSame('1234', $keys[0]->localPart);
+        $this->assertSame('urn:uuid:', $keys[0]->namespace->uri);
+        $this->assertSame('urn:uuid:1234', $keys[0]->getUri());
+    }
+
+    public function testIterationOverOpaqueColonOnlyIriKeyDoesNotCrash(): void
+    {
+        $attrs = new Attributes(['tag:example' => ['x']]);
+
+        $pairs = [];
+        foreach ($attrs as $key => $value) {
+            $pairs[] = [$key->getUri(), $value];
+        }
+
+        $this->assertSame([['tag:example', 'x']], $pairs);
+    }
+
+    public function testKeyUriEndingInItsSeparatorIsRejectedLoudly(): void
+    {
+        // A key URI with nothing after its last separator has no local part;
+        // the rejection must name the key, not surface as an unrelated
+        // QualifiedName or ProvNamespace construction error.
+        $attrs = new Attributes(['urn:uuid:' => ['x']]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage("attribute key URI 'urn:uuid:'");
+        $attrs->keys();
+    }
+
+    public function testKeyUriWithoutAnySeparatorIsRejectedLoudly(): void
+    {
+        $attrs = new Attributes(['word' => ['x']]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage("attribute key URI 'word'");
+        $attrs->keys();
+    }
+
     public function testIterationYieldsEachValueWithQualifiedNameKey(): void
     {
         $key1 = $this->prov->qualifiedName('type');

@@ -223,7 +223,11 @@ readonly class Attributes implements \Countable, \IteratorAggregate
      * Returns the QualifiedName for a key URI. For instances constructed from
      * raw URI-keyed data without key objects, one is derived from the URI: the
      * local part starts after the last '#' or '/', and the prefix is minted
-     * deterministically from the namespace URI.
+     * deterministically from the namespace URI. Opaque IRIs with neither
+     * separator (e.g. `urn:uuid:1234`, `tag:example`) split at the last ':'
+     * instead, so the scheme-plus-NSS forms the namespace. A key that yields
+     * an empty namespace or local part (no separator at all, or nothing after
+     * the last one) cannot become a QualifiedName and is rejected loudly.
      */
     private function keyFor(string $uri): QualifiedName
     {
@@ -234,8 +238,19 @@ readonly class Attributes implements \Countable, \IteratorAggregate
         $hashPos = strrpos($uri, '#');
         $slashPos = strrpos($uri, '/');
         $pos = max($hashPos === false ? -1 : $hashPos, $slashPos === false ? -1 : $slashPos);
+        if ($pos < 0) {
+            $colonPos = strrpos($uri, ':');
+            if ($colonPos !== false) {
+                $pos = $colonPos;
+            }
+        }
         $nsUri = substr($uri, 0, $pos + 1);
         $localPart = substr($uri, $pos + 1);
+        if ($nsUri === '' || $localPart === '') {
+            throw new \InvalidArgumentException(
+                "Cannot derive a namespace and local part from attribute key URI '{$uri}'.",
+            );
+        }
 
         return new QualifiedName(new ProvNamespace('ns' . crc32($nsUri), $nsUri), $localPart);
     }

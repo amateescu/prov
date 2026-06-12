@@ -32,6 +32,47 @@ readonly class ProvNamespace implements \Stringable
     }
 
     /**
+     * Mints a namespace under an RFC 8141 `urn:uuid:` URN with an optional
+     * f-component (fragment) path.
+     *
+     * The URI is `urn:uuid:{uuid}`, followed by `#{fragmentPath}` when a
+     * fragment path is given. The UUID is validated up front so callers cannot
+     * silently produce a garbage URN such as `urn:uuid:#node/` from an empty
+     * or malformed identifier.
+     *
+     * @param string $prefix
+     *   The short prefix bound to the minted namespace.
+     * @param string $uuid
+     *   A canonical RFC 4122 UUID (8-4-4-4-12 hexadecimal digits),
+     *   case-insensitive.
+     * @param string $fragmentPath
+     *   The f-component appended after '#'. A single leading '#' is tolerated
+     *   and not duplicated. Empty yields a bare `urn:uuid:` namespace. End the
+     *   path with a delimiter (e.g. `node/`): qualifiedName() concatenates
+     *   local parts directly onto it, so `node` would mint `#node42`.
+     *
+     * @throws \InvalidArgumentException
+     *   When the UUID is empty or not a well-formed RFC 4122 UUID.
+     */
+    public static function urnUuid(string $prefix, string $uuid, string $fragmentPath = ''): self
+    {
+        if (\preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $uuid) !== 1) {
+            throw new \InvalidArgumentException(
+                $uuid === ''
+                    ? 'A urn:uuid namespace requires a non-empty UUID.'
+                    : "Malformed UUID '{$uuid}'; expected the RFC 4122 8-4-4-4-12 hexadecimal form.",
+            );
+        }
+
+        $uri = 'urn:uuid:' . $uuid;
+        if ($fragmentPath !== '') {
+            $uri .= '#' . \ltrim($fragmentPath, '#');
+        }
+
+        return new self($prefix, $uri);
+    }
+
+    /**
      * @param string $prefix
      *   The short form used in serialized output. Must be non-empty; the
      *   library represents a document's default namespace with the reserved
@@ -67,8 +108,13 @@ readonly class ProvNamespace implements \Stringable
     }
 
     /**
-     * Whether the given QualifiedName belongs to this namespace (i.e. its
-     * URI begins with this namespace's URI).
+     * Whether the given QualifiedName's URI begins with this namespace's URI.
+     *
+     * This is a raw prefix test with no longest-match or local-part guard: an
+     * identifier under a nested namespace (`http://e/sub/x`) also reports true
+     * for the parent (`http://e/`). It is not safe for resolving a URI to its
+     * most specific namespace; use `NamespaceManager::resolveUri()` or
+     * `uriToPrefixed()` for that.
      */
     public function contains(QualifiedName $identifier): bool
     {
