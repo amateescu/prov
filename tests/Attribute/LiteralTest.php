@@ -55,6 +55,19 @@ final class LiteralTest extends TestCase
         $this->assertSame('http://www.w3.org/2001/XMLSchema#int', $lit->datatype->uri);
     }
 
+    public function testIntFactoryAcceptsInt32Bounds(): void
+    {
+        $this->assertSame('2147483647', Literal::int(Literal::XSD_INT_MAX)->value);
+        $this->assertSame('-2147483648', Literal::int(Literal::XSD_INT_MIN)->value);
+    }
+
+    public function testIntFactoryRejectsValueAboveInt32(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('outside the 32-bit xsd:int range');
+        Literal::int(Literal::XSD_INT_MAX + 1);
+    }
+
     public function testBooleanFactoryTrue(): void
     {
         $lit = Literal::boolean(true);

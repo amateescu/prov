@@ -13,6 +13,7 @@ use Prov\Document;
 use Prov\Entity;
 use Prov\Exception\DeserializationException;
 use Prov\Exception\NamespaceException;
+use Prov\Exception\ProvException;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
@@ -49,6 +50,7 @@ use Prov\Relation\Usage;
  * @mago-ignore analysis:invalid-iterator
  * @mago-ignore analysis:less-specific-argument
  * @mago-ignore analysis:less-specific-nested-argument-type
+ * @mago-ignore analysis:imprecise-type
  */
 class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterface
 {
@@ -70,6 +72,9 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
     /**
      * {@inheritdoc}
+     *
+     * @throws \Prov\Exception\ProvException
+     *   When two bundles share an identifier (their JSON keys would collide).
      */
     #[\NoDiscard]
     public function serialize(Document $document): string
@@ -83,7 +88,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             if ($ns->prefix === 'default') {
                 $nsManager->setDefault($ns);
             } else {
-                $nsManager->add($ns);
+                $nsManager->addOrReplace($ns);
             }
         }
         $minter = new PrefixMinter($nsManager);
@@ -102,7 +107,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                 if ($ns->prefix === 'default') {
                     $bundleNsManager->setDefault($ns);
                 } else {
-                    $bundleNsManager->add($ns);
+                    $bundleNsManager->addOrReplace($ns);
                 }
             }
             $bundleData = [];
@@ -111,6 +116,12 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                 $bundleData['prefix'] = $bundlePrefixes;
             }
             $this->serializeRecords($bundle->records, $bundleData, $bundleNsManager);
+            if (isset($output['bundle'][$bundleKey])) {
+                throw new ProvException(
+                    "Cannot serialize a document with two bundles sharing the identifier '{$bundleKey}'; "
+                    . 'merge them first.',
+                );
+            }
             $output['bundle'][$bundleKey] = $bundleData;
         }
 
@@ -120,13 +131,20 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $output['prefix'][$ns->prefix] = $ns->uri;
         }
 
+        // An empty prefix map must not encode as a JSON array `[]`; drop it so
+        // the document object never carries an array-valued 'prefix'.
+        if ($output['prefix'] === []) {
+            unset($output['prefix']);
+        }
+
         $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION;
         if ($this->prettyPrint) {
             $flags |= JSON_PRETTY_PRINT;
         }
 
-        // JSON_THROW_ON_ERROR guarantees string-or-throw, never false.
-        $encoded = json_encode($output, $flags);
+        // JSON_THROW_ON_ERROR guarantees string-or-throw, never false. An empty
+        // document must still encode as the object `{}`, never the array `[]`.
+        $encoded = json_encode($output === [] ? new \stdClass() : $output, $flags);
         assert(is_string($encoded));
         return $encoded;
     }
@@ -233,7 +251,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             if ($existing !== null && $existing->uri === $uri) {
                 continue;
             }
-            $nsManager->add(new ProvNamespace($prefix, $uri));
+            $nsManager->addOrReplace(new ProvNamespace($prefix, $uri));
         }
 
         $records = [];
@@ -260,7 +278,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                         if ($existing !== null && $existing->uri === $uri) {
                             continue;
                         }
-                        $bundleNsManager->add(new ProvNamespace($prefix, $uri));
+                        $bundleNsManager->addOrReplace(new ProvNamespace($prefix, $uri));
                     }
                 }
 

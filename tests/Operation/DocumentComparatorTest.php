@@ -340,4 +340,22 @@ final class DocumentComparatorTest extends TestCase
 
         $this->assertTrue(DocumentComparator::equals($a->build(), $b->build()));
     }
+
+    public function testDictionaryKeyTypedLiteralEqualsRawArrayAcrossPrefix(): void
+    {
+        // A dictionary key typed as a full-URI Literal must compare equal to the
+        // same key expressed as a raw PROV-JSON typed-literal array (prefixed
+        // datatype), since the comparator ignores prefixes.
+        $a = $this->buildDoc();
+        $a->hadDictionaryMember('ex:dict', [
+            new \Prov\Relation\Dictionary\DictionaryEntry(Literal::int(5), null),
+        ]);
+
+        $b = $this->buildDoc();
+        $b->hadDictionaryMember('ex:dict', [
+            new \Prov\Relation\Dictionary\DictionaryEntry(['$' => '5', 'type' => 'xsd:int'], null),
+        ]);
+
+        $this->assertTrue(DocumentComparator::equals($a->build(), $b->build()));
+    }
 }

@@ -10,6 +10,7 @@ use Prov\Attribute\Literal;
 use Prov\Builder\DocumentBuilder;
 use Prov\Entity;
 use Prov\Exception\DeserializationException;
+use Prov\Exception\ProvException;
 use Prov\Identifier\ProvNamespace;
 use Prov\Relation\Alternate;
 use Prov\Relation\Association;
@@ -49,9 +50,11 @@ final class JsonSerializerTest extends TestCase
     {
         $doc = new DocumentBuilder()->build();
         $json = $this->serializer->serialize($doc);
-        $data = json_decode($json, true);
 
-        $this->assertArrayHasKey('prefix', $data);
+        // An empty document is the JSON object `{}`, never an array, and carries
+        // no empty 'prefix' key.
+        $this->assertSame('{}', $json);
+        $this->assertArrayNotHasKey('prefix', (array) json_decode($json, true));
     }
 
     public function testSerializePrefixes(): void
@@ -188,7 +191,7 @@ final class JsonSerializerTest extends TestCase
 
     public function testSerializePrettyPrint(): void
     {
-        $doc = $this->buildDoc()->build();
+        $doc = $this->buildDoc()->entity('ex:e1')->build();
         $pretty = new JsonSerializer(prettyPrint: true);
         $json = $pretty->serialize($doc);
 
@@ -1019,5 +1022,19 @@ final class JsonSerializerTest extends TestCase
         $json = json_decode($this->serializer->serialize($doc), true);
         $this->assertArrayHasKey('_:b1', $json['entity']);
         $this->assertCount(1, $json['entity']);
+    }
+
+    public function testDuplicateBundleIdentifierThrows(): void
+    {
+        $doc = $this
+            ->buildDoc()
+            ->withBundle('ex:bnd', static fn($bb): mixed => $bb->entity('ex:e1'))
+            ->withBundle('ex:bnd', static fn($bb): mixed => $bb->entity('ex:e2'))
+            ->build();
+
+        $this->expectException(ProvException::class);
+        $this->expectExceptionMessage('two bundles sharing the identifier');
+        $json = $this->serializer->serialize($doc);
+        $this->assertIsString($json); // Unreachable: serialize() throws above.
     }
 }

@@ -383,4 +383,30 @@ final class XmlSerializerTest extends TestCase
         $this->expectException(DeserializationException::class);
         $this->serializer->deserialize($xml);
     }
+
+    public function testIntAttributeTypedByRange(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1', ['ex:small' => 42, 'ex:big' => 9_999_999_999]);
+        $output = $this->serializer->serialize($builder->build());
+
+        $this->assertStringContainsString('xsi:type="xsd:int"', $output);
+        $this->assertStringContainsString('xsi:type="xsd:long"', $output);
+        $this->assertStringContainsString('9999999999', $output);
+    }
+
+    public function testUnderscoreDigitAttributeRoundTrips(): void
+    {
+        // `0foo` escapes to `_0foo`; a genuine `_0foo` must escape to `__0foo`
+        // so both survive a round trip instead of colliding.
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1', ['ex:0foo' => 'a', 'ex:_0foo' => 'b']);
+        $doc = $builder->build();
+
+        $back = $this->serializer->deserialize($this->serializer->serialize($doc));
+        $attrs = $back->entities[0]->attributes;
+
+        $this->assertSame(['a'], $attrs->get($this->ex->qualifiedName('0foo')));
+        $this->assertSame(['b'], $attrs->get($this->ex->qualifiedName('_0foo')));
+    }
 }

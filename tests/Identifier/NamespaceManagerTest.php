@@ -256,10 +256,21 @@ final class NamespaceManagerTest extends TestCase
         $this->assertSame('http://www.w3.org/ns/prov#', $ns->uri);
     }
 
-    public function testReRegisterBuiltinWithDifferentUriOverridesSilently(): void
+    public function testAddBuiltinWithDifferentUriThrows(): void
+    {
+        // add() is strict: rebinding a built-in is a likely typo, so it throws
+        // and points the caller at addOrReplace().
+        $manager = new NamespaceManager();
+
+        $this->expectException(NamespaceException::class);
+        $this->expectExceptionMessage('library built-in');
+        $manager->add(new ProvNamespace('prov', 'http://other.org/prov#'));
+    }
+
+    public function testAddOrReplaceOverridesBuiltin(): void
     {
         $manager = new NamespaceManager();
-        $manager->add(new ProvNamespace('prov', 'http://other.org/prov#'));
+        $manager->addOrReplace(new ProvNamespace('prov', 'http://other.org/prov#'));
 
         $ns = $manager->getNamespace('prov');
         $this->assertSame('http://other.org/prov#', $ns->uri);
@@ -274,14 +285,15 @@ final class NamespaceManagerTest extends TestCase
         $manager->add(new ProvNamespace('ex', 'http://other.org/'));
     }
 
-    public function testBuiltinOverrideIsOneShot(): void
+    public function testAddOrReplaceCanRebindRepeatedly(): void
     {
-        // Once a user has overridden a built-in, subsequent conflicts throw.
+        // addOrReplace() always takes the latest binding, built-in or not.
         $manager = new NamespaceManager();
-        $manager->add(new ProvNamespace('prov', 'http://a.example/'));
+        $manager->addOrReplace(new ProvNamespace('prov', 'http://a.example/'));
+        $manager->addOrReplace(new ProvNamespace('prov', 'http://b.example/'));
 
-        $this->expectException(NamespaceException::class);
-        $manager->add(new ProvNamespace('prov', 'http://b.example/'));
+        $ns = $manager->getNamespace('prov');
+        $this->assertSame('http://b.example/', $ns->uri);
     }
 
     public function testResolveFullUrnMatchesRegisteredNamespace(): void
@@ -372,14 +384,14 @@ final class NamespaceManagerTest extends TestCase
     public function testChildCanIndependentlyOverrideBuiltinAlreadyOverriddenByParent(): void
     {
         // A bundle-scoped NamespaceManager has its own fresh builtin tracking, so
-        // each scope gets one independent shot at rebinding prov/xsd even when an
-        // ancestor has already rebound the same prefix. Resolutions in the child
-        // pick up the child's binding, not the parent's.
+        // each scope can independently rebind prov/xsd via addOrReplace() even
+        // when an ancestor has already rebound the same prefix. Resolutions in
+        // the child pick up the child's binding, not the parent's.
         $parent = new NamespaceManager();
-        $parent->add(new ProvNamespace('prov', 'http://parent.example/prov#'));
+        $parent->addOrReplace(new ProvNamespace('prov', 'http://parent.example/prov#'));
 
         $child = new NamespaceManager($parent);
-        $child->add(new ProvNamespace('prov', 'http://child.example/prov#'));
+        $child->addOrReplace(new ProvNamespace('prov', 'http://child.example/prov#'));
 
         $this->assertSame('http://child.example/prov#', $child->resolve('prov:Entity')->namespace->uri);
         $this->assertSame('http://parent.example/prov#', $parent->resolve('prov:Entity')->namespace->uri);

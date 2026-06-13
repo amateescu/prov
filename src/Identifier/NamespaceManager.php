@@ -10,10 +10,11 @@ use Prov\Exception\NamespaceException;
  * Collects and resolves namespace declarations for builders, serializers, and deserializers.
  *
  * The prov/xsd namespaces are preregistered as library built-ins so callers can use
- * prefixed names without explicit declaration. Documents that authoritatively redeclare
- * a built-in (e.g. PROV-XML fixtures that use a non-canonical URI) silently override
- * the built-in. Redeclaring any other prefix with a different URI throws, since that
- * indicates a caller mistake.
+ * prefixed names without explicit declaration. `add()` is strict: redeclaring any
+ * prefix (built-in or caller-declared) with a different URI throws, so a typo cannot
+ * silently corrupt a binding. Deserializers and serializers, which faithfully reproduce
+ * whatever a foreign document declares (including a non-canonical prov/xsd URI), use
+ * `addOrReplace()` to opt out of that strictness.
  */
 class NamespaceManager
 {
@@ -41,32 +42,66 @@ class NamespaceManager
     }
 
     /**
-     * Registers a namespace. Silently overrides a built-in (prov/xsd) if the caller
-     * declares it with a different URI. Throws on conflict with any previously
-     * user-registered prefix.
+     * Registers a namespace, throwing on any conflict.
+     *
+     * Re-registering a prefix with the same URI is a no-op (the existing
+     * instance is kept so cached QualifiedNames stay valid). Re-registering it
+     * with a different URI throws, whether the prefix is a library built-in
+     * (prov/xsd) or a previous caller declaration. Use `addOrReplace()` to
+     * deliberately rebind.
+     *
+     * @throws \Prov\Exception\NamespaceException
+     *   When the prefix is already bound to a different URI.
      */
     public function add(ProvNamespace $ns): void
     {
         $existing = $this->namespaces[$ns->prefix] ?? null;
         if ($existing !== null) {
             if ($existing->uri === $ns->uri) {
-                // Same URI; no structural change. Keep the existing instance so
-                // any cached QualifiedNames referencing it stay valid. Clear the
-                // built-in marker because the prefix has now been declared by
-                // the caller.
+                // Same binding; no structural change. Clear the built-in marker
+                // because the prefix is now a caller declaration.
                 unset($this->builtinPrefixes[$ns->prefix]);
                 return;
             }
-            if (!isset($this->builtinPrefixes[$ns->prefix])) {
+            if (isset($this->builtinPrefixes[$ns->prefix])) {
                 throw new NamespaceException(
-                    "Prefix '{$ns->prefix}' is already registered with URI '{$existing->uri}', cannot re-register with URI '{$ns->uri}'.",
+                    "Prefix '{$ns->prefix}' is a library built-in bound to '{$existing->uri}'; "
+                    . "use addOrReplace() to rebind it to '{$ns->uri}'.",
                 );
             }
+            throw new NamespaceException(
+                "Prefix '{$ns->prefix}' is already registered with URI '{$existing->uri}', cannot re-register with URI '{$ns->uri}'.",
+            );
+        }
+        $this->namespaces[$ns->prefix] = $ns;
+        $this->invalidateCaches();
+    }
+
+    /**
+     * Registers a namespace, rebinding the prefix if it is already bound to a
+     * different URI. The deserializer/serializer counterpart to `add()`: a
+     * foreign document is the authority on its own declarations, so a
+     * non-canonical prov/xsd URI (or any redeclared prefix) replaces the prior
+     * binding rather than throwing.
+     */
+    public function addOrReplace(ProvNamespace $ns): void
+    {
+        $existing = $this->namespaces[$ns->prefix] ?? null;
+        if ($existing !== null && $existing->uri === $ns->uri) {
+            unset($this->builtinPrefixes[$ns->prefix]);
+            return;
         }
         $this->namespaces[$ns->prefix] = $ns;
         unset($this->builtinPrefixes[$ns->prefix]);
-        // A new-URI entry invalidates any cached resolutions that may have
-        // used the old binding.
+        $this->invalidateCaches();
+    }
+
+    /**
+     * A new-URI entry invalidates any cached resolutions that used the old
+     * binding.
+     */
+    private function invalidateCaches(): void
+    {
         $this->resolveCache = [];
         $this->uriToPrefixedCache = [];
     }

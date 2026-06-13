@@ -9,9 +9,12 @@ use Prov\Exception\ConstraintViolationException;
 /**
  * The result of running the PROV-CONSTRAINTS validator: either empty
  * (valid) or a list of violations. Chain `throwIfInvalid()` for an
- * exception-based flow, or iterate directly via `getViolations()`.
+ * exception-based flow, iterate the list directly (it is `IteratorAggregate`),
+ * or pull the array via `getViolations()`.
+ *
+ * @implements \IteratorAggregate<int, \Prov\Constraint\ConstraintViolation>
  */
-class ConstraintViolationList implements \Countable
+class ConstraintViolationList implements \Countable, \IteratorAggregate
 {
     /** @var list<\Prov\Constraint\ConstraintViolation> */
     private array $violations = [];
@@ -72,5 +75,13 @@ class ConstraintViolationList implements \Countable
     public function count(): int
     {
         return count($this->violations);
+    }
+
+    /**
+     * @return \ArrayIterator<int, \Prov\Constraint\ConstraintViolation>
+     */
+    public function getIterator(): \ArrayIterator
+    {
+        return new \ArrayIterator($this->violations);
     }
 }

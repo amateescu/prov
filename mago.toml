@@ -42,12 +42,6 @@ assertion-style = { style = "this" }
 # `possibly-null-property-access` on lookup-by-id calls).
 excludes = ["tests"]
 
-# Builder signatures and DictionaryEntry::$key accept broad `array` by design
-# (convenience shape on the way in, narrowed inside resolveAttributes / validated
-# at use). Native PHP types can't express the narrow shape, and docblock
-# @param's would clone the same long union across 27 methods.
-ignore = ["imprecise-type"]
-
 minimum-fail-level = "warning"
 
 # Catch real issues beyond plain type-checking.

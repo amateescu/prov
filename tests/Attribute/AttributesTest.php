@@ -322,4 +322,28 @@ final class AttributesTest extends TestCase
         $this->assertCount(3, $attrs);
         $this->assertCount(0, new Attributes());
     }
+
+    public function testMergeAppendsValuesUnderSharedKey(): void
+    {
+        $type = $this->prov->qualifiedName('type');
+        $label = $this->prov->qualifiedName('label');
+
+        $a = new Attributes()->with($type, 'Document');
+        $b = new Attributes()
+            ->with($type, 'Article')
+            ->with($label, 'My Doc');
+
+        $merged = $a->merge($b);
+
+        $this->assertSame(['Document', 'Article'], $merged->get($type));
+        $this->assertSame(['My Doc'], $merged->get($label));
+        // Operands are untouched (immutable).
+        $this->assertSame(['Document'], $a->get($type));
+    }
+
+    public function testMergeWithEmptyReturnsSelf(): void
+    {
+        $a = new Attributes()->with($this->prov->qualifiedName('type'), 'Document');
+        $this->assertSame($a, $a->merge(new Attributes()));
+    }
 }

@@ -16,6 +16,13 @@ use Prov\Identifier\QualifiedName;
 readonly class Literal implements \Stringable
 {
     /**
+     * The inclusive bounds of the 32-bit `xsd:int` value space. A PHP int
+     * outside this range cannot be represented as `xsd:int`; use `long()`.
+     */
+    public const int XSD_INT_MIN = -2_147_483_648;
+    public const int XSD_INT_MAX = 2_147_483_647;
+
+    /**
      * @param string $value
      *   The lexical value of the literal.
      * @param ?\Prov\Identifier\QualifiedName $datatype
@@ -42,9 +49,20 @@ readonly class Literal implements \Stringable
         return new self($value, ProvNamespace::xsd()->qualifiedName('string'));
     }
 
-    /** Literal typed as `xsd:int`. */
+    /**
+     * Literal typed as `xsd:int`.
+     *
+     * @throws \InvalidArgumentException
+     *   When the value falls outside the 32-bit xsd:int range; use `long()`
+     *   for 64-bit values.
+     */
     public static function int(int $value): self
     {
+        if ($value < self::XSD_INT_MIN || $value > self::XSD_INT_MAX) {
+            throw new \InvalidArgumentException(
+                "Value {$value} is outside the 32-bit xsd:int range; use Literal::long() for 64-bit values.",
+            );
+        }
         return new self((string) $value, ProvNamespace::xsd()->qualifiedName('int'));
     }
 

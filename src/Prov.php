@@ -21,13 +21,16 @@ use Prov\Constraint\ConstraintViolationList;
 final class Prov
 {
     /**
-     * Starts a fresh DocumentBuilder. Equivalent to `new DocumentBuilder()`;
-     * lets callers that already have `Prov\Prov` in scope skip a second
-     * `use` import.
+     * Starts a fresh DocumentBuilder, optionally preloaded with namespaces.
+     * Equivalent to `new DocumentBuilder($namespaces)`; lets callers that
+     * already have `Prov\Prov` in scope skip a second `use` import.
+     *
+     * @param iterable<\Prov\Identifier\ProvNamespace> $namespaces
+     *   Namespaces to register on the new builder up front.
      */
-    public static function documentBuilder(): DocumentBuilder
+    public static function documentBuilder(iterable $namespaces = []): DocumentBuilder
     {
-        return new DocumentBuilder();
+        return new DocumentBuilder($namespaces);
     }
 
     /**
@@ -45,6 +48,7 @@ final class Prov
      * @throws \Prov\Exception\ProvException
      *   When deserializing a serialize-only format (PROV-JSONLD).
      */
+    #[\NoDiscard]
     public static function deserialize(string $data, Format $format = Format::Json): Document
     {
         return $format->createDeserializer()->deserialize($data);
@@ -55,6 +59,7 @@ final class Prov
      * violation list. Chain `->throwIfInvalid()` on the result to get an
      * exception-based flow.
      */
+    #[\NoDiscard]
     public static function validate(Document $document): ConstraintViolationList
     {
         return new ConstraintValidator()->validate($document);

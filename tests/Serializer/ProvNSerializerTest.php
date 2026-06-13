@@ -445,4 +445,14 @@ final class ProvNSerializerTest extends TestCase
 
         $this->assertStringContainsString('"contains \\"quotes\\""', $output);
     }
+
+    public function testIntAttributeTypedByRange(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1', ['ex:small' => 42, 'ex:big' => 9_999_999_999]);
+        $output = $this->serializer->serialize($builder->build());
+
+        $this->assertStringContainsString('"42" %% xsd:int', $output);
+        $this->assertStringContainsString('"9999999999" %% xsd:long', $output);
+    }
 }

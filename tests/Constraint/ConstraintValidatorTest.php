@@ -10,6 +10,7 @@ use Prov\Attribute\Attributes;
 use Prov\Builder\DocumentBuilder;
 use Prov\Constraint\ConstraintValidator;
 use Prov\Constraint\ConstraintViolationList;
+use Prov\Document;
 use Prov\Exception\ConstraintViolationException;
 use Prov\Identifier\ProvNamespace;
 use Prov\Relation\Dictionary\DictionaryEntry;
@@ -935,5 +936,98 @@ final class ConstraintValidatorTest extends TestCase
         $b->wasAttributedTo(identifier: 'ex:x', entity: 'ex:e1', agent: 'ex:ag');
 
         $this->assertCount(0, $this->validate($b)->getViolationsByConstraint(53));
+    }
+
+    public function testConstraint33UsageAtActivityBoundsIsValid(): void
+    {
+        $start = new \DateTimeImmutable('2024-01-01T00:00:00Z');
+        $end = new \DateTimeImmutable('2024-01-02T00:00:00Z');
+        $b = $this->buildDoc();
+        $b->activity('ex:a1', $start, $end);
+        $b->used(activity: 'ex:a1', entity: 'ex:e1', time: $start);
+        $b->used(activity: 'ex:a1', entity: 'ex:e2', time: $end);
+
+        $this->assertCount(0, $this->validate($b)->getViolationsByConstraint(33));
+    }
+
+    public function testConstraint33UsageOutsideBoundsViolatesInBothDirections(): void
+    {
+        $start = new \DateTimeImmutable('2024-01-01T00:00:00Z');
+        $end = new \DateTimeImmutable('2024-01-02T00:00:00Z');
+        $b = $this->buildDoc();
+        $b->activity('ex:a1', $start, $end);
+        $b->used(activity: 'ex:a1', entity: 'ex:e1', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $b->used(activity: 'ex:a1', entity: 'ex:e2', time: new \DateTimeImmutable('2024-01-03T00:00:00Z'));
+
+        $this->assertCount(2, $this->validate($b)->getViolationsByConstraint(33));
+    }
+
+    public function testConstraint34GenerationAtActivityBoundsIsValid(): void
+    {
+        $start = new \DateTimeImmutable('2024-01-01T00:00:00Z');
+        $end = new \DateTimeImmutable('2024-01-02T00:00:00Z');
+        $b = $this->buildDoc();
+        $b->activity('ex:a1', $start, $end);
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: $start);
+        $b->wasGeneratedBy(entity: 'ex:e2', activity: 'ex:a1', time: $end);
+
+        $this->assertCount(0, $this->validate($b)->getViolationsByConstraint(34));
+    }
+
+    public function testConstraint34GenerationOutsideBoundsViolatesInBothDirections(): void
+    {
+        $start = new \DateTimeImmutable('2024-01-01T00:00:00Z');
+        $end = new \DateTimeImmutable('2024-01-02T00:00:00Z');
+        $b = $this->buildDoc();
+        $b->activity('ex:a1', $start, $end);
+        $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        $b->wasGeneratedBy(entity: 'ex:e2', activity: 'ex:a1', time: new \DateTimeImmutable('2024-01-03T00:00:00Z'));
+
+        $this->assertCount(2, $this->validate($b)->getViolationsByConstraint(34));
+    }
+
+    public function testViolationsAreStableUnderRecordReorder(): void
+    {
+        // A document with violations across rule families: a start-after-end
+        // activity (constraint 30) and an identifier used as both an entity and
+        // an activity (constraint 50). The validator must report the same
+        // violations no matter what order the records arrive in.
+        $b = $this->buildDoc();
+        $b->activity(
+            'ex:a1',
+            new \DateTimeImmutable('2024-01-02T00:00:00Z'),
+            new \DateTimeImmutable('2024-01-01T00:00:00Z'),
+        );
+        $b->used(activity: 'ex:x', entity: 'ex:y');
+        $b->wasInvalidatedBy(entity: 'ex:x', activity: 'ex:z');
+        $doc = $b->build();
+
+        $baseline = $this->violationSignatures($this->validator->validate($doc));
+        $this->assertNotEmpty($baseline);
+
+        mt_srand(424_242);
+        for ($i = 0; $i < 25; $i++) {
+            $records = $doc->records;
+            shuffle($records);
+            $shuffled = new Document(records: $records, bundles: $doc->bundles, namespaces: $doc->namespaces);
+            $this->assertSame(
+                $baseline,
+                $this->violationSignatures($this->validator->validate($shuffled)),
+                "violations differed after reordering (iteration {$i})",
+            );
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function violationSignatures(ConstraintViolationList $list): array
+    {
+        $sigs = array_map(
+            static fn($v): string => $v->constraintId . ':' . ($v->recordIdentifier ?? '') . ':' . $v->message,
+            $list->getViolations(),
+        );
+        sort($sigs);
+        return $sigs;
     }
 }

@@ -56,7 +56,7 @@ final class ProvGraphTest extends TestCase
         // even though "urn:..." has no '//' authority and superficially looks
         // like a prefixed shorthand.
         $builder = new DocumentBuilder();
-        $builder->addNamespace(ProvNamespace::urnUuid('node', 'abcdef12-3456-7890-abcd-ef1234567890', 'node/'));
+        $builder->addNamespace(new ProvNamespace('node', 'urn:uuid:abcdef12-3456-7890-abcd-ef1234567890#node/'));
         $builder->entity('node:42');
         $graph = new ProvGraph($builder->build());
 
@@ -253,5 +253,38 @@ final class ProvGraphTest extends TestCase
         $this->assertCount(1, $graph->relationsReferencing('ex:a1'));
         $this->assertCount(1, $graph->relationsFrom('ex:a1'));
         $this->assertCount(1, $graph->relationsTo('ex:a1'));
+    }
+
+    public function testResolvesUnprefixedIdentifiersAgainstDefaultNamespace(): void
+    {
+        $doc = new DocumentBuilder()
+            ->setDefaultNamespace(new ProvNamespace('default', 'http://default.example/'))
+            ->entity('e1')
+            ->activity('a1')
+            ->wasGeneratedBy(entity: 'e1', activity: 'a1')
+            ->build();
+
+        $graph = new ProvGraph($doc);
+
+        // The default prefix in declared namespaces is treated as the default,
+        // so a bare local part resolves the same as its full URI.
+        $this->assertNotNull($graph->recordByIdentifier('e1'));
+        $this->assertNotNull($graph->recordByIdentifier('http://default.example/e1'));
+        $this->assertCount(1, $graph->relationsFrom('e1'));
+        $this->assertCount(1, $graph->generationsOf('e1'));
+    }
+
+    public function testConstructsOverDocumentRedeclaringBuiltinNamespace(): void
+    {
+        // A document may carry a non-canonical prov/xsd URI (e.g. a deserialized
+        // PROV-XML fixture that declares xsd without a trailing '#'). The graph
+        // constructor must reproduce that binding, not throw on the built-in
+        // "conflict" the strict NamespaceManager::add() would flag.
+        $xsd = new ProvNamespace('xsd', 'http://www.w3.org/2001/XMLSchema');
+        $thing = $xsd->qualifiedName('thing');
+        $doc = new Document(records: [new Entity($thing)], bundles: [], namespaces: [$xsd]);
+
+        $graph = new ProvGraph($doc);
+        $this->assertNotNull($graph->recordByIdentifier($thing->getUri()));
     }
 }

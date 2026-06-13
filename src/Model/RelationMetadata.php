@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Prov\Model;
 
+use Prov\Identifier\QualifiedName;
 use Prov\Relation\Alternate;
 use Prov\Relation\Association;
 use Prov\Relation\Attribution;
 use Prov\Relation\Communication;
 use Prov\Relation\Delegation;
 use Prov\Relation\Derivation;
+use Prov\Relation\Dictionary\DictionaryEntry;
 use Prov\Relation\Dictionary\DictionaryInsertion;
 use Prov\Relation\Dictionary\DictionaryMembership;
 use Prov\Relation\Dictionary\DictionaryRemoval;
@@ -36,10 +38,10 @@ use Prov\Relation\Usage;
 final class RelationMetadata
 {
     /**
-     * Maps relation class names to their formal attribute property names.
-     * Each entry is a list of [propertyName, type] pairs where type is
-     * 'ref' (QualifiedName reference), 'time' (DateTimeImmutable), or
-     * 'array' (for dictionary key-entity pairs / removed keys).
+     * Maps relation class names to their formal attribute properties. Each
+     * entry is a map of `propertyName => type`, in PROV-N positional order,
+     * where type is 'ref' (QualifiedName reference), 'time' (DateTimeImmutable),
+     * or 'array' (dictionary key-entity pairs / removed keys).
      *
      * @var array<class-string<\Prov\Model\ProvRelation>, array<string, string>>
      */
@@ -315,6 +317,63 @@ final class RelationMetadata
             $result[$prop] = $vars[$prop] ?? null;
         }
         return $result;
+    }
+
+    /**
+     * Every identifier a relation references through its formal endpoints, in
+     * PROV-N positional order, followed by the entities of its dictionary
+     * entries. Null endpoints are skipped. The single source of truth for
+     * "what does this relation point at"; `ProvGraph::referencedIdentifiers()`
+     * is a thin delegate.
+     *
+     * @return list<\Prov\Identifier\QualifiedName>
+     */
+    public static function refEndpoints(ProvRelation $relation): array
+    {
+        $out = [];
+        $vars = get_object_vars($relation);
+        foreach (self::FORMALS[$relation::class] ?? [] as $prop => $type) {
+            if ($type !== 'ref') {
+                continue;
+            }
+            // @mago-expect analysis:mixed-assignment
+            $value = $vars[$prop] ?? null;
+            if ($value instanceof QualifiedName) {
+                $out[] = $value;
+            }
+        }
+        foreach (self::dictionaryEntities($relation) as $entity) {
+            $out[] = $entity;
+        }
+        return $out;
+    }
+
+    /**
+     * The entities referenced by a relation's dictionary entries, if any.
+     *
+     * @return list<\Prov\Identifier\QualifiedName>
+     */
+    public static function dictionaryEntities(ProvRelation $relation): array
+    {
+        $out = [];
+        $vars = get_object_vars($relation);
+        foreach (self::FORMALS[$relation::class] ?? [] as $prop => $type) {
+            if ($type !== 'array') {
+                continue;
+            }
+            // @mago-expect analysis:mixed-assignment
+            $items = $vars[$prop] ?? null;
+            if (!is_array($items)) {
+                continue;
+            }
+            // @mago-expect analysis:mixed-assignment
+            foreach ($items as $item) {
+                if ($item instanceof DictionaryEntry && $item->entity !== null) {
+                    $out[] = $item->entity;
+                }
+            }
+        }
+        return $out;
     }
 
     /**

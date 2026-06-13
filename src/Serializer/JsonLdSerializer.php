@@ -41,7 +41,7 @@ class JsonLdSerializer implements ProvSerializerInterface
             if ($ns->prefix === 'default') {
                 $nsManager->setDefault($ns);
             } else {
-                $nsManager->add($ns);
+                $nsManager->addOrReplace($ns);
             }
         }
         $minter = new PrefixMinter($nsManager);
@@ -56,7 +56,7 @@ class JsonLdSerializer implements ProvSerializerInterface
                 if ($ns->prefix === 'default') {
                     $bundleNsManager->setDefault($ns);
                 } else {
-                    $bundleNsManager->add($ns);
+                    $bundleNsManager->addOrReplace($ns);
                 }
             }
 

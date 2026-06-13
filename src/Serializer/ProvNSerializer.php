@@ -52,7 +52,7 @@ class ProvNSerializer implements ProvSerializerInterface
             if ($ns->prefix === 'default') {
                 $nsManager->setDefault($ns);
             } else {
-                $nsManager->add($ns);
+                $nsManager->addOrReplace($ns);
             }
         }
         $minter = new PrefixMinter($nsManager);
@@ -111,7 +111,7 @@ class ProvNSerializer implements ProvSerializerInterface
             if ($ns->prefix === 'default') {
                 $nsManager->setDefault($ns);
             } else {
-                $nsManager->add($ns);
+                $nsManager->addOrReplace($ns);
             }
         }
 
@@ -471,7 +471,8 @@ class ProvNSerializer implements ProvSerializerInterface
         }
 
         if (is_int($value)) {
-            return "\"{$value}\" %% xsd:int";
+            $datatype = $value < Literal::XSD_INT_MIN || $value > Literal::XSD_INT_MAX ? 'xsd:long' : 'xsd:int';
+            return "\"{$value}\" %% {$datatype}";
         }
 
         if (is_float($value)) {

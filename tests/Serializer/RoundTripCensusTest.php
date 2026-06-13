@@ -66,10 +66,15 @@ final class RoundTripCensusTest extends TestCase
         foreach ([Format::Json, Format::ProvN, Format::Xml] as $format) {
             try {
                 $serialized = Prov::serialize($original, $format);
-            } catch (\InvalidArgumentException) {
-                // The document carries a construct this format cannot represent
-                // (e.g. an attribute key that is not a valid XML element name);
-                // rejecting it loudly is the documented behavior, not a loss.
+            } catch (\InvalidArgumentException $e) {
+                // Only PROV-XML may legitimately reject a representable document:
+                // it encodes attribute keys as XML element names, so a key that
+                // is not a valid NCName has no representation. PROV-N and PROV-JSON
+                // escape every representable input (review items 2.2/2.5), so a
+                // rejection there is a regression, not an allowed loss.
+                if ($format !== Format::Xml) {
+                    $this->fail("[{$format->name}] rejected a representable fixture: {$e->getMessage()}");
+                }
                 $this->addToAssertionCount(1);
                 continue;
             }

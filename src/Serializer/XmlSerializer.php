@@ -94,7 +94,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $nsManager = new NamespaceManager();
         foreach ($document->namespaces as $ns) {
             if ($ns->prefix === 'prov' || $ns->prefix === 'xsd') {
-                $nsManager->add($ns);
+                $nsManager->addOrReplace($ns);
                 continue;
             }
             if ($ns->prefix === 'default') {
@@ -105,7 +105,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                 continue;
             }
             $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:' . $ns->prefix, $ns->uri);
-            $nsManager->add($ns);
+            $nsManager->addOrReplace($ns);
         }
         // Minted namespaces need no root declaration: createElementNS declares
         // them on the elements that use them.
@@ -396,11 +396,14 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         // Resolve the key to namespace URI + local part for createElement.
         $parts = explode(':', $prefixedKey, 2);
         // XML element names can't start with a digit; PROV-XML's convention is to
-        // prefix such local parts with an underscore.
+        // prefix such local parts with an underscore. A name that is already an
+        // underscore-run followed by a digit (e.g. "_0") is escaped too, by
+        // prepending one more underscore, so the deserializer can tell an escaped
+        // name from a genuine one (`_0foo` -> `__0foo`, recovered on read).
         try {
             if (count($parts) === 2) {
                 $local = $parts[1];
-                if ($local !== '' && ctype_digit($local[0])) {
+                if (preg_match('/^_*\d/', $local) === 1) {
                     $local = '_' . $local;
                     $prefixedKey = $parts[0] . ':' . $local;
                 }
@@ -419,7 +422,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                     }
                 }
             } else {
-                if ($prefixedKey !== '' && ctype_digit($prefixedKey[0])) {
+                if (preg_match('/^_*\d/', $prefixedKey) === 1) {
                     $prefixedKey = '_' . $prefixedKey;
                 }
                 $el = $dom->createElement($prefixedKey);
@@ -446,7 +449,8 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             $el->setAttributeNS(self::XSI_NS, 'xsi:type', 'xsd:boolean');
             $el->textContent = $value ? 'true' : 'false';
         } elseif (is_int($value)) {
-            $el->setAttributeNS(self::XSI_NS, 'xsi:type', 'xsd:int');
+            $type = $value < Literal::XSD_INT_MIN || $value > Literal::XSD_INT_MAX ? 'xsd:long' : 'xsd:int';
+            $el->setAttributeNS(self::XSI_NS, 'xsi:type', $type);
             $el->textContent = (string) $value;
         } elseif (is_float($value)) {
             $el->setAttributeNS(self::XSI_NS, 'xsi:type', 'xsd:float');
@@ -492,7 +496,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             if ($ns->prefix !== 'prov' && $ns->prefix !== 'xsd') {
                 $el->setAttribute('xmlns:' . $ns->prefix, $ns->uri);
             }
-            $bundleNsManager->add($ns);
+            $bundleNsManager->addOrReplace($ns);
         }
 
         foreach ($bundle->records as $record) {
@@ -907,7 +911,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                 continue;
             }
 
-            $target->add(new ProvNamespace($prefix, $uri));
+            $target->addOrReplace(new ProvNamespace($prefix, $uri));
         }
     }
 
@@ -969,7 +973,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             // Register a synthetic namespace so the caller can resolve it.
             $syntheticPrefix = '_ns' . crc32($defaultUri);
             $ns = new ProvNamespace($syntheticPrefix, $defaultUri);
-            $nsManager->add($ns);
+            $nsManager->addOrReplace($ns);
             return $syntheticPrefix . ':' . $value;
         }
 
@@ -1004,12 +1008,16 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
 
             // PROV-XML encodes an attribute whose local part starts with a digit
             // (e.g. `0tagWithDigit`) as `_0tagWithDigit` so the XML element name
-            // is valid. Strip the leading underscore to recover the canonical name.
+            // is valid; a name that was already an underscore-run before a digit
+            // gained one extra underscore. Both escaped forms are an underscore
+            // run immediately followed by a digit, so strip exactly one
+            // underscore to recover the canonical name (`__0foo` -> `_0foo`,
+            // `_0foo` -> `0foo`). A genuine name like `_foo` is untouched.
             $localName = $child->localName;
             if ($localName === null) {
                 continue;
             }
-            if (preg_match('/^_[0-9]/', $localName) === 1) {
+            if (preg_match('/^_+[0-9]/', $localName) === 1) {
                 $localName = substr($localName, 1);
             }
             $prefix = $child->prefix;

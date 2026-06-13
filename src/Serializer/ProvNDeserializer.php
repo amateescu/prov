@@ -176,7 +176,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
             throw $this->err('Malformed prefix declaration.');
         }
 
-        $nsManager->add(new ProvNamespace($prefix, $uri));
+        $nsManager->addOrReplace(new ProvNamespace($prefix, $uri));
     }
 
     private function parseDefault(NamespaceManager $nsManager): void
