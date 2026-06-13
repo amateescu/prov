@@ -46,6 +46,12 @@ final class SerializerRoundTripPropertyTest extends TestCase
         // Unprefixed identifiers resolve against the document default namespace.
         'd1',
         'd2',
+        // Escapable PROV-N punctuation in the local part (exercises 2.2/2.3).
+        'ex:a,b',
+        // Slash in the local part: the versioned-name shape (exercises 3.2).
+        'ex:42/rev/7',
+        // Identifier under a URN namespace with a fragment path.
+        'node:n1/rev/2',
     ];
 
     private const array TIMES = [null, '2024-01-15T10:00:00Z', '2024-06-01T08:30:00.123456+02:00'];
@@ -208,6 +214,7 @@ final class SerializerRoundTripPropertyTest extends TestCase
     {
         $b = new DocumentBuilder()
             ->addNamespace(new ProvNamespace('ex', 'http://example.org/'))
+            ->addNamespace(new ProvNamespace('node', 'urn:uuid:12345678-1234-1234-1234-123456789abc#node/'))
             ->setDefaultNamespace(new ProvNamespace('default', 'http://default.example/'));
         foreach ($specs as $spec) {
             $attrs = $this->attrsFor($spec['attrs'] ?? 0);

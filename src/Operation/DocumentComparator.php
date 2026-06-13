@@ -392,6 +392,23 @@ final class DocumentComparator
     }
 
     /**
+     * Expands a `prefix:local` datatype written against a library built-in
+     * (xsd/prov) to its full URI, so a raw-array typed-literal key signs the
+     * same as a Literal. Any other prefix is returned unchanged: without a
+     * NamespaceManager it cannot be resolved, and custom datatypes are rare.
+     */
+    private static function expandDatatypePrefix(string $type): string
+    {
+        if (str_starts_with($type, 'xsd:')) {
+            return 'http://www.w3.org/2001/XMLSchema#' . substr($type, 4);
+        }
+        if (str_starts_with($type, 'prov:')) {
+            return 'http://www.w3.org/ns/prov#' . substr($type, 5);
+        }
+        return $type;
+    }
+
+    /**
      * The PROV-XML fixtures declare xsd: without a trailing `#` while PROV-JSON fixtures
      * declare it with one. Both point at the same W3C XSD namespace. Normalize so
      * `.../XMLSchemastring` and `.../XMLSchema#string` compare equal.
@@ -491,7 +508,10 @@ final class DocumentComparator
                 }
                 $sig = 'lit:' . $key['$'];
                 if ($type !== null && $type !== 'xsd:string') {
-                    $sig .= '^^' . $type;
+                    // Sign by full datatype URI, matching valueSignature(): a key
+                    // typed `xsd:int` in PROV-JSON must compare equal to the same
+                    // key as a Literal carrying the full XSD URI in another format.
+                    $sig .= '^^' . self::normalizeDatatypeUri(self::expandDatatypePrefix($type));
                 }
                 if ($lang !== null) {
                     $sig .= '@' . $lang;

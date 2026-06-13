@@ -13,6 +13,9 @@ use Prov\Identifier\QualifiedName;
  *
  * The key is `mixed` by spec: PROV-DICT allows arbitrary typed literals, QualifiedName
  * keys, and (on the deserialization side) raw passthrough values from untyped JSON.
+ * The `array` arm of `$key` is that raw JSON shape and cannot be narrowed natively.
+ *
+ * @mago-ignore analysis:imprecise-type
  */
 final readonly class DictionaryEntry
 {

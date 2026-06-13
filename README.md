@@ -45,6 +45,8 @@ echo $json;
 $parsed = Prov::deserialize($json, Format::Json);
 ```
 
+The static `Prov::` calls are a convenience facade. Under a dependency-injection container, construct the underlying classes directly: `DocumentBuilder`, the per-format serializers (`Format::Json->createSerializer()` / `createDeserializer()`), and `ConstraintValidator`.
+
 > **Always pass relation arguments by name.** PROV-DM fixes a per-relation positional order that does *not* follow subject-before-object. `wasGeneratedBy` takes `(entity, activity)` but `used` takes `(activity, entity)`: the two sit in opposite orders even though they connect the same two records. Positional calls silently invert the relation:
 >
 > ```php
@@ -67,6 +69,12 @@ $parsed = Prov::deserialize($json, Format::Json);
 | PROV-N | yes | yes |
 | PROV-XML | yes | yes |
 | PROV-JSONLD | yes | no (would require an RDF-aware parser) |
+
+### PROV-N notes
+
+The PROV-N parser accepts two convenience extensions beyond the published grammar, so input that parses here is not necessarily canonical PROV-N: line (`//`) and block (`/* */`) comments, and optional commas between a relation's arguments. Output always uses the canonical form.
+
+PROV-N has no slot for an explicit identifier on `specializationOf`, `alternateOf`, `hadMember`, or `mentionOf`. When a document carries one of these relations *with* an identifier (legal in PROV-JSON/PROV-XML), the PROV-N serializer drops the identifier, since the grammar cannot express it. `DocumentComparator::equals()` will flag the difference on a JSON-to-PROV-N-to-JSON round trip; keep such relations in PROV-JSON or PROV-XML if their identifiers matter.
 
 ## Document operations
 
@@ -121,7 +129,7 @@ Coverage is partial: rules that need transitive graph reasoning over derivation 
 
 ## Builder tips
 
-**Namespaces.** Register namespaces one at a time (`namespace()`, `addNamespace()`) or in bulk from an application-wide registry (`addNamespaces($iterable)`). `build()` prunes the declarations down to the namespaces your records actually reference, so registering many namespaces up front does not bloat the serialized output; call `keepUnusedNamespaces()` to keep them all. Documents obtained from `Prov::deserialize()` are not affected: they keep every namespace they declared.
+**Namespaces.** Register namespaces one at a time (`namespace()`, `addNamespace()`) or in bulk from an application-wide registry (`addNamespaces($iterable)`); `DocumentBuilder` also accepts an iterable to preload at construction. Re-registering a prefix with a different URI throws, including the `prov`/`xsd` built-ins, so a typo cannot silently corrupt a binding. `build()` prunes the declarations down to the namespaces your records actually reference, so registering many namespaces up front does not bloat the serialized output; call `keepUnusedNamespaces()` to keep them all. Documents obtained from `Prov::deserialize()` are not affected: they keep every namespace they declared.
 
 **Attributes.** Pass attributes as an associative array: keys are resolved as namespace shorthands, and a list value adds one entry per element (that is how a repeated key is written, since PHP array keys are unique):
 
@@ -141,13 +149,17 @@ $attrs = new AttributesBuilder($namespaceManager)
     ->build();
 ```
 
+Two `Attributes` bags combine with `$a->merge($b)`: a multimap union that keeps all values under a shared key (the way to promote a single value to several).
+
 **Blank nodes (anonymous records):**
 
 ```php
-$e = $builder->blank();          // _:b1
+$e = $builder->blank();          // _:b1, auto-minted
 $builder->entity($e);
 $builder->wasGeneratedBy(entity: $e, activity: 'ex:writing');
 ```
+
+Use `QualifiedName::blankNode('b1')` instead when you control the label.
 
 **Bundles.** `withBundle()` is the recommended form: it builds the bundle eagerly, inline, without breaking the fluent chain:
 

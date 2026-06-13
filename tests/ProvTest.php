@@ -74,7 +74,10 @@ final class ProvTest extends TestCase
     public function testDeserializeJsonLdThrows(): void
     {
         $this->expectException(ProvException::class);
-        Prov::deserialize('{}', Format::JsonLd);
+        $document = Prov::deserialize('{}', Format::JsonLd);
+        // Unreachable: the call above throws. Referencing the result keeps the
+        // #[\NoDiscard] return from registering as discarded.
+        $this->assertInstanceOf(\Prov\Document::class, $document);
     }
 
     public function testDefaultFormatIsJson(): void

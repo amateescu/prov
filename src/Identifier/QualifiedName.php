@@ -43,6 +43,32 @@ readonly class QualifiedName implements \Stringable
     }
 
     /**
+     * Mints a blank-node identifier with an explicit label, e.g.
+     * `QualifiedName::blankNode('b1')`. Use this when you control the label;
+     * use `RecordBuilder::blank()` to auto-mint a fresh, collision-free one.
+     *
+     * A leading `_:` on the label is tolerated and not duplicated, so both
+     * `blankNode('x')` and `blankNode('_:x')` yield the `_:x` node, mirroring
+     * how `NamespaceManager::resolve()` reads a serialized blank node.
+     *
+     * @param string $label
+     *   The blank-node label (the part after `_:`). Must be non-empty.
+     *
+     * @throws \InvalidArgumentException
+     *   When the label is empty.
+     */
+    public static function blankNode(string $label): self
+    {
+        if (str_starts_with($label, '_:')) {
+            $label = substr($label, 2);
+        }
+        if ($label === '') {
+            throw new \InvalidArgumentException('Blank-node label cannot be empty.');
+        }
+        return new self(new ProvNamespace('_', '_:'), $label);
+    }
+
+    /**
      * The full URI form (namespace URI concatenated with the local part).
      * Shorthand for the public `$uri` property.
      */

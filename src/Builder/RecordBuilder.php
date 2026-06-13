@@ -59,6 +59,13 @@ use Prov\Relation\Usage;
  *   $b->used(activity: 'ex:a1', entity: 'ex:e1');            // correct
  *   $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1');  // correct
  *   $b->used('ex:a1', 'ex:e1');                              // DO NOT DO THIS
+ *
+ * Element and relation methods accept a broad `Attributes|array|null` (and
+ * `array` dictionary pairs) by design: the convenience shape is narrowed inside
+ * resolveAttributes(). Native types cannot express the narrow shape and a
+ * docblock @param would clone the same long union across every method.
+ *
+ * @mago-ignore analysis:imprecise-type
  */
 abstract class RecordBuilder
 {
@@ -707,6 +714,10 @@ abstract class RecordBuilder
      * identifiers, relation endpoints, attribute keys and values, literal
      * datatypes, and dictionary entries.
      *
+     * Deliberately separate from `RelationMetadata::refEndpoints()`: this walks
+     * whole records (identifiers, attribute keys/values, datatypes) to a URI set
+     * for namespace pruning, not a relation's endpoints to a QualifiedName list.
+     *
      * @param list<\Prov\Model\ProvRecord> $records
      * @param array<string, true> $uris
      *
@@ -792,13 +803,7 @@ abstract class RecordBuilder
     protected function resolveAttributes(Attributes|array|null $attrs): Attributes
     {
         if ($attrs === null) {
-            // Hot-path shared empty: avoids an Attributes::empty() call per record
-            // (~40ns saved, measurable across large builds). Kept in sync with
-            // Attributes::empty() because both return a plain `new Attributes()`;
-            // if Attributes::empty() ever grows state, update this site too.
-            /** @var \Prov\Attribute\Attributes|null $empty */
-            static $empty = null;
-            return $empty ??= new Attributes();
+            return Attributes::empty();
         }
 
         if ($attrs instanceof Attributes) {

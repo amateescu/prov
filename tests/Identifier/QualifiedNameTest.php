@@ -54,4 +54,24 @@ final class QualifiedNameTest extends TestCase
         $this->expectExceptionMessage('local part cannot be empty');
         new QualifiedName($this->ex, '');
     }
+
+    public function testBlankNodeFromLabel(): void
+    {
+        $qn = QualifiedName::blankNode('b1');
+        $this->assertTrue($qn->isBlank());
+        $this->assertSame('_:b1', $qn->getUri());
+        $this->assertSame('b1', $qn->localPart);
+    }
+
+    public function testBlankNodeToleratesLeadingSentinel(): void
+    {
+        $this->assertSame('_:x', QualifiedName::blankNode('_:x')->getUri());
+    }
+
+    public function testBlankNodeRejectsEmptyLabel(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('label cannot be empty');
+        QualifiedName::blankNode('');
+    }
 }

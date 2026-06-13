@@ -227,9 +227,13 @@ final class DocumentOperations
     }
 
     /**
-     * Remaps a dictionary entry key, preserving its declared value union.
+     * Remaps a dictionary entry key, preserving its declared value union. The
+     * `array` arm mirrors DictionaryEntry::$key's by-design broad shape (a raw
+     * PROV-JSON typed-literal map), which a native type cannot narrow.
      *
      * @param array<string, \Prov\Identifier\ProvNamespace> $byUri
+     *
+     * @mago-ignore analysis:imprecise-type
      */
     private static function remapDictKey(
         QualifiedName|Literal|string|int|float|bool|array|null $key,
@@ -314,6 +318,15 @@ final class DocumentOperations
     /**
      * Merge two documents. Records and bundles from both documents are combined.
      * Namespace declarations are deduplicated by URI.
+     *
+     * This is concatenation, not set union: the combined record list keeps both
+     * documents' records verbatim, so a record present in both appears twice.
+     * Equal records are not collapsed (PROV-DM has no record identity beyond an
+     * optional identifier, and even identically-shaped records may be distinct
+     * assertions). Deduplicate afterward via `DocumentComparator` signatures if
+     * set semantics are wanted. Bundles, by contrast, are merged by identifier:
+     * two bundles sharing a URI have their records concatenated and namespaces
+     * reconciled.
      *
      * @throws \Prov\Exception\NamespaceException
      *   If the two documents (or two bundles sharing an identifier) declare the

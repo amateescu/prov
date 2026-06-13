@@ -44,6 +44,7 @@
     },
     "require-dev": {
         "carthage-software/mago": "^1.30.0",
+        "ext-dom": "*",
         "infection/infection": "^0.32.6",
         "openprov/testcases": "1.0.0",
         "phpunit/phpunit": "^12.0"

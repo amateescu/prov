@@ -26,9 +26,15 @@ class DocumentBuilder extends RecordBuilder
     /** @var list<\Prov\Builder\BundleBuilder> */
     private array $bundleBuilders = [];
 
-    public function __construct()
+    /**
+     * @param iterable<\Prov\Identifier\ProvNamespace> $namespaces
+     *   Namespaces to register up front, equivalent to calling
+     *   `addNamespaces()` immediately after construction.
+     */
+    public function __construct(iterable $namespaces = [])
     {
         $this->namespaceManager = new NamespaceManager();
+        $this->addNamespaces($namespaces);
     }
 
     /**

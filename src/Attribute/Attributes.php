@@ -63,6 +63,32 @@ readonly class Attributes implements \Countable, \IteratorAggregate
     }
 
     /**
+     * Returns a new Attributes instance with every value of `$other` appended.
+     *
+     * Because the bag is a multimap, a key present in both instances keeps all
+     * of its values: the merge appends rather than overwrites, promoting a
+     * single value to multiple under the same key. Key objects already present
+     * win; otherwise `$other`'s key object is carried over.
+     */
+    public function merge(self $other): self
+    {
+        if ($other->data === []) {
+            return $this;
+        }
+        $data = $this->data;
+        $keys = $this->keys;
+        foreach ($other->data as $uri => $values) {
+            foreach ($values as $value) {
+                $data[$uri][] = $value;
+            }
+            if (!isset($keys[$uri]) && isset($other->keys[$uri])) {
+                $keys[$uri] = $other->keys[$uri];
+            }
+        }
+        return new self($data, $keys);
+    }
+
+    /**
      * Creates an Attributes instance from an array of [QualifiedName, value] pairs.
      *
      * @param list<array{\Prov\Identifier\QualifiedName, \Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool}> $pairs

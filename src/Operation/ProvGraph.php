@@ -12,7 +12,6 @@ use Prov\Identifier\QualifiedName;
 use Prov\Model\ProvRecord;
 use Prov\Model\ProvRelation;
 use Prov\Model\RelationMetadata;
-use Prov\Relation\Dictionary\DictionaryEntry;
 use Prov\Relation\Generation;
 use Prov\Relation\Usage;
 
@@ -66,7 +65,11 @@ final class ProvGraph
             if ($ns->prefix === 'default') {
                 $nsManager->setDefault($ns);
             } else {
-                $nsManager->add($ns);
+                // The container is the authority on its own declarations, so a
+                // non-canonical prov/xsd URI it carries (preserved verbatim
+                // through deserialization) replaces the built-in rather than
+                // throwing, matching how the serializers/deserializers read it.
+                $nsManager->addOrReplace($ns);
             }
         }
         $this->nsManager = $nsManager;
@@ -105,7 +108,7 @@ final class ProvGraph
                     $byEndpoint[$uri][] = $relation;
                 }
             }
-            foreach (self::dictionaryEntities($relation) as $entity) {
+            foreach (RelationMetadata::dictionaryEntities($relation) as $entity) {
                 $uri = $entity->getUri();
                 if (!isset($seen[$uri])) {
                     $seen[$uri] = true;
@@ -205,20 +208,7 @@ final class ProvGraph
      */
     public static function referencedIdentifiers(ProvRelation $relation): array
     {
-        $out = [];
-        foreach (RelationMetadata::FORMALS[$relation::class] ?? [] as $prop => $type) {
-            if ($type !== 'ref') {
-                continue;
-            }
-            $value = self::refProperty($relation, $prop);
-            if ($value !== null) {
-                $out[] = $value;
-            }
-        }
-        foreach (self::dictionaryEntities($relation) as $entity) {
-            $out[] = $entity;
-        }
-        return $out;
+        return RelationMetadata::refEndpoints($relation);
     }
 
     private function toUri(QualifiedName|string $identifier): string
@@ -253,32 +243,5 @@ final class ProvGraph
         // @mago-expect analysis:mixed-assignment
         $value = get_object_vars($relation)[$prop] ?? null;
         return $value instanceof QualifiedName ? $value : null;
-    }
-
-    /**
-     * The entities referenced by a relation's dictionary entries, if any.
-     *
-     * @return list<\Prov\Identifier\QualifiedName>
-     */
-    private static function dictionaryEntities(ProvRelation $relation): array
-    {
-        $out = [];
-        foreach (RelationMetadata::FORMALS[$relation::class] ?? [] as $prop => $type) {
-            if ($type !== 'array') {
-                continue;
-            }
-            // @mago-expect analysis:mixed-assignment
-            $items = get_object_vars($relation)[$prop] ?? null;
-            if (!is_array($items)) {
-                continue;
-            }
-            // @mago-expect analysis:mixed-assignment
-            foreach ($items as $item) {
-                if ($item instanceof DictionaryEntry && $item->entity !== null) {
-                    $out[] = $item->entity;
-                }
-            }
-        }
-        return $out;
     }
 }
