@@ -26,6 +26,7 @@ class JsonLdSerializer implements ProvSerializerInterface
 {
     public function __construct(
         public readonly bool $prettyPrint = false,
+        public readonly bool $sortRecords = false,
     ) {}
 
     private ?PrefixMinter $minter = null;
@@ -48,7 +49,8 @@ class JsonLdSerializer implements ProvSerializerInterface
         $this->minter = $minter;
 
         $context = $this->buildContext($document);
-        $graph = $this->buildGraph($document->records, $nsManager);
+        $documentRecords = $this->sortRecords ? OutputOrder::records($document->records) : $document->records;
+        $graph = $this->buildGraph($documentRecords, $nsManager);
 
         foreach ($document->bundles as $bundle) {
             $bundleNsManager = new NamespaceManager($nsManager);
@@ -60,10 +62,11 @@ class JsonLdSerializer implements ProvSerializerInterface
                 }
             }
 
+            $bundleRecords = $this->sortRecords ? OutputOrder::records($bundle->records) : $bundle->records;
             $bundleNode = [
                 '@id' => $this->jsonLdId($bundle->identifier),
                 '@type' => 'prov:Bundle',
-                '@graph' => $this->buildGraph($bundle->records, $bundleNsManager),
+                '@graph' => $this->buildGraph($bundleRecords, $bundleNsManager),
             ];
             $graph[] = $bundleNode;
         }
@@ -71,6 +74,7 @@ class JsonLdSerializer implements ProvSerializerInterface
         foreach ($minter->getMintedNamespaces() as $ns) {
             $context[$ns->prefix] = $ns->uri;
         }
+        $context = OutputOrder::prefixMap($context);
 
         $output = ['@context' => $context];
         if (count($graph) === 1 && !isset($graph[0]['@graph'])) {

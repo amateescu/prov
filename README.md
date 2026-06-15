@@ -70,6 +70,14 @@ The static `Prov::` calls are a convenience facade. Under a dependency-injection
 | PROV-XML | yes | yes |
 | PROV-JSONLD | yes | no (would require an RDF-aware parser) |
 
+### Output ordering
+
+PROV serializations are unordered (a document is a set of records, namespaces a set of declarations), so ordering never affects meaning. For stable, readable output every serializer always sorts namespace declarations: the `prov`/`xsd` built-ins first, then the rest alphabetically by prefix. Records keep the order you added them by default; pass `sortRecords: true` to a serializer to order them into PROV-DM concept order instead (elements first, then relations in component order, each group sorted by identifier):
+
+```php
+$json = new JsonSerializer(sortRecords: true)->serialize($doc);
+```
+
 ### PROV-N notes
 
 The PROV-N parser accepts two convenience extensions beyond the published grammar, so input that parses here is not necessarily canonical PROV-N: line (`//`) and block (`/* */`) comments, and optional commas between a relation's arguments. Output always uses the canonical form.

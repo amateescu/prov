@@ -71,6 +71,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
     public function __construct(
         public readonly bool $prettyPrint = false,
+        public readonly bool $sortRecords = false,
     ) {
         $this->blankNodes = new \WeakMap();
     }
@@ -122,7 +123,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $bundleData = [];
             $bundlePrefixes = $this->serializePrefixes($bundle->namespaces, $document->namespaces);
             if ($bundlePrefixes !== []) {
-                $bundleData['prefix'] = $bundlePrefixes;
+                $bundleData['prefix'] = OutputOrder::prefixMap($bundlePrefixes);
             }
             $this->serializeRecords($bundle->records, $bundleData, $bundleNsManager);
             if (isset($output['bundle'][$bundleKey])) {
@@ -144,6 +145,8 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         // the document object never carries an array-valued 'prefix'.
         if ($output['prefix'] === []) {
             unset($output['prefix']);
+        } else {
+            $output['prefix'] = OutputOrder::prefixMap($output['prefix']);
         }
 
         $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION;
@@ -341,6 +344,9 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
      */
     private function serializeRecords(array $records, array &$output, NamespaceManager $nsManager): void
     {
+        if ($this->sortRecords) {
+            $records = OutputOrder::records($records);
+        }
         foreach ($records as $record) {
             match (true) {
                 $record instanceof Entity => $this->serializeElement($record, 'entity', $output, $nsManager),
