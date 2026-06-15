@@ -92,4 +92,28 @@ abstract readonly class RecordContainer
         }
         return null;
     }
+
+    /**
+     * A forward pass over this container's relations, yielding one
+     * `\Prov\Model\EntityInvolvement` per entity-typed endpoint (including each
+     * dictionary entry's entity). Lets a consumer derive a "which entity took
+     * part in what" index from a finished container instead of mirroring each
+     * builder relation call.
+     *
+     * Covers only this container's own relations: a Document does not descend
+     * into its bundles (call this on each Bundle, or flatten first).
+     *
+     * @return list<\Prov\Model\EntityInvolvement>
+     */
+    public function entityInvolvements(): array
+    {
+        $out = [];
+        foreach ($this->relations as $relation) {
+            $relationType = RelationMetadata::relationLabel($relation);
+            foreach (RelationMetadata::entityEndpoints($relation) as $endpoint) {
+                $out[] = new EntityInvolvement($relationType, $endpoint['role'], $endpoint['entity']);
+            }
+        }
+        return $out;
+    }
 }

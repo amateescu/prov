@@ -89,6 +89,8 @@ abstract class RecordBuilder
 
     protected bool $keepUnusedNamespaces = false;
 
+    protected bool $autoDeclareEntities = false;
+
     private int $blankNodeCounter = 0;
 
     /**
@@ -173,6 +175,23 @@ abstract class RecordBuilder
     public function keepUnusedNamespaces(): static
     {
         $this->keepUnusedNamespaces = true;
+        return $this;
+    }
+
+    /**
+     * At `build()`, emit a bare `Entity` record for any entity-typed relation
+     * endpoint that no record already declares, so a consumer that wants every
+     * referenced node to appear in the document need not hand-declare each one.
+     * Off by default, so the built container is unchanged unless this is set.
+     *
+     * Only entity-typed endpoints qualify (a relation's activity, agent, event,
+     * and bundle references are left alone), blank-node endpoints are skipped,
+     * and an endpoint already carried by a record (of any type) is never
+     * duplicated. Call before creating bundles so they inherit the choice.
+     */
+    public function autoDeclareEntities(): static
+    {
+        $this->autoDeclareEntities = true;
         return $this;
     }
 
@@ -686,6 +705,45 @@ abstract class RecordBuilder
     }
 
     // --- Internal helpers ---
+
+    /**
+     * Bare `Entity` records for the entity-typed relation endpoints in
+     * `$records` that no record there already declares. Blank-node endpoints
+     * are skipped, an endpoint declared by a record of any type is left alone
+     * (so no duplicate-identifier record is minted), and each new entity is
+     * emitted once, in first-referenced order.
+     *
+     * @param list<\Prov\Model\ProvRecord> $records
+     *
+     * @return list<\Prov\Entity>
+     */
+    protected static function autoDeclaredEntities(array $records): array
+    {
+        $declared = [];
+        foreach ($records as $record) {
+            if ($record->identifier !== null) {
+                $declared[$record->identifier->getUri()] = true;
+            }
+        }
+
+        $entities = [];
+        $seen = [];
+        foreach ($records as $record) {
+            if (!$record instanceof ProvRelation) {
+                continue;
+            }
+            foreach (RelationMetadata::entityEndpoints($record) as $endpoint) {
+                $entity = $endpoint['entity'];
+                $uri = $entity->getUri();
+                if ($entity->isBlank() || isset($declared[$uri]) || isset($seen[$uri])) {
+                    continue;
+                }
+                $seen[$uri] = true;
+                $entities[] = new Entity(identifier: $entity, attributes: Attributes::empty());
+            }
+        }
+        return $entities;
+    }
 
     /**
      * Filters namespaces down to those covering at least one referenced URI.

@@ -41,13 +41,18 @@ class BundleBuilder extends RecordBuilder
     {
         $this->markBuilt();
 
+        $records = $this->records;
+        if ($this->autoDeclareEntities) {
+            $records = [...$records, ...self::autoDeclaredEntities($records)];
+        }
+
         $namespaces = $this->namespaceManager->getRegisteredNamespaces();
         if (!$this->keepUnusedNamespaces) {
-            $usedUris = self::collectReferencedUris($this->records);
+            $usedUris = self::collectReferencedUris($records);
             $usedUris[$this->identifier->getUri()] = true;
             $namespaces = self::pruneNamespaces($namespaces, $usedUris);
         }
 
-        return new Bundle(identifier: $this->identifier, records: $this->records, namespaces: $namespaces);
+        return new Bundle(identifier: $this->identifier, records: $records, namespaces: $namespaces);
     }
 }

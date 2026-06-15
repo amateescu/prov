@@ -349,6 +349,73 @@ final class RelationMetadata
     }
 
     /**
+     * Every entity-typed endpoint of a relation, as `role`/`entity` pairs in
+     * PROV-N positional order, followed by the entities of its dictionary
+     * entries (role `keyEntity`). The role is the formal property name
+     * (`entity`, `specificEntity`, `generatedEntity`, `plan`, ...). Null
+     * endpoints are skipped. "Entity-typed" is read from TYPING_ROLES, so
+     * activity, agent, event (a derivation's generation/usage), and bundle
+     * endpoints are excluded.
+     *
+     * @return list<array{role: string, entity: \Prov\Identifier\QualifiedName}>
+     */
+    public static function entityEndpoints(ProvRelation $relation): array
+    {
+        $out = [];
+        $vars = get_object_vars($relation);
+        foreach (self::TYPING_ROLES[$relation::class] ?? [] as $prop => $role) {
+            if ($role !== 'entity') {
+                continue;
+            }
+            // @mago-expect analysis:mixed-assignment
+            $value = $vars[$prop] ?? null;
+            if ($value instanceof QualifiedName) {
+                $out[] = ['role' => $prop, 'entity' => $value];
+            }
+        }
+        foreach (self::dictionaryEntities($relation) as $entity) {
+            $out[] = ['role' => 'keyEntity', 'entity' => $entity];
+        }
+        return $out;
+    }
+
+    /**
+     * The PROV-N keyword for a relation, e.g. `wasGeneratedBy`, `used`,
+     * `specializationOf`. A Derivation carrying a `prov:type` of `prov:Revision`,
+     * `prov:Quotation`, or `prov:PrimarySource` reports the subtype shortcut
+     * (`wasRevisionOf`, ...) rather than the bare `wasDerivedFrom`.
+     */
+    public static function relationLabel(ProvRelation $relation): string
+    {
+        if ($relation instanceof Derivation) {
+            $subtype = self::derivationSubtypeLabel($relation);
+            if ($subtype !== null) {
+                return $subtype;
+            }
+        }
+        return self::JSON_KEYS[$relation::class] ?? $relation::class;
+    }
+
+    /**
+     * The derivation-subtype keyword (`wasRevisionOf`, `wasQuotedFrom`,
+     * `hadPrimarySource`) carried by a Derivation's `prov:type` attribute, or
+     * null when it is a plain derivation.
+     */
+    private static function derivationSubtypeLabel(Derivation $relation): ?string
+    {
+        $types = $relation->attributes->all()['http://www.w3.org/ns/prov#type'] ?? [];
+        foreach ($types as $type) {
+            if ($type instanceof QualifiedName && $type->namespace->uri === 'http://www.w3.org/ns/prov#') {
+                $keyword = array_search($type->localPart, self::DERIVATION_SUBTYPES, true);
+                if ($keyword !== false) {
+                    return $keyword;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * The entities referenced by a relation's dictionary entries, if any.
      *
      * @return list<\Prov\Identifier\QualifiedName>
