@@ -323,27 +323,97 @@ final class AttributesTest extends TestCase
         $this->assertCount(0, new Attributes());
     }
 
-    public function testMergeAppendsValuesUnderSharedKey(): void
+    public function testConstructorDedupesIdenticalValuesUnderSameKey(): void
     {
-        $type = $this->prov->qualifiedName('type');
-        $label = $this->prov->qualifiedName('label');
+        $key = $this->prov->qualifiedName('type');
+        $uri = $key->getUri();
 
-        $a = new Attributes()->with($type, 'Document');
-        $b = new Attributes()
-            ->with($type, 'Article')
-            ->with($label, 'My Doc');
+        $attrs = new Attributes([$uri => ['Document', 'Document', 'Article']], [$uri => $key]);
 
-        $merged = $a->merge($b);
-
-        $this->assertSame(['Document', 'Article'], $merged->get($type));
-        $this->assertSame(['My Doc'], $merged->get($label));
-        // Operands are untouched (immutable).
-        $this->assertSame(['Document'], $a->get($type));
+        // Identical pairs collapse (set semantics); the first occurrence is kept.
+        $this->assertSame(['Document', 'Article'], $attrs->get($key));
+        $this->assertCount(2, $attrs);
     }
 
-    public function testMergeWithEmptyReturnsSelf(): void
+    public function testConstructorKeepsDistinctValuesUnderSameKey(): void
     {
-        $a = new Attributes()->with($this->prov->qualifiedName('type'), 'Document');
-        $this->assertSame($a, $a->merge(new Attributes()));
+        $key = $this->prov->qualifiedName('type');
+        $uri = $key->getUri();
+
+        $attrs = new Attributes([$uri => ['Document', 'Article']], [$uri => $key]);
+
+        // A multi-valued attribute with distinct values is untouched.
+        $this->assertSame(['Document', 'Article'], $attrs->get($key));
+    }
+
+    public function testDedupeTreatsBareStringAndXsdStringLiteralAsEqual(): void
+    {
+        $key = $this->prov->qualifiedName('label');
+        $uri = $key->getUri();
+
+        $attrs = new Attributes([$uri => ['foo', Literal::string('foo'), new Literal('foo')]], [$uri => $key]);
+
+        // A bare scalar and the typed Literal it round-trips to are one value.
+        $this->assertCount(1, $attrs);
+        $this->assertSame(['foo'], $attrs->get($key));
+    }
+
+    public function testDedupeTreatsBareIntAndXsdIntLiteralAsEqual(): void
+    {
+        $key = $this->prov->qualifiedName('value');
+        $uri = $key->getUri();
+
+        $attrs = new Attributes([$uri => [42, Literal::int(42)]], [$uri => $key]);
+
+        $this->assertCount(1, $attrs);
+        $this->assertSame([42], $attrs->get($key));
+    }
+
+    public function testDedupeKeepsValuesThatDifferOnlyByDatatype(): void
+    {
+        $key = $this->prov->qualifiedName('value');
+        $uri = $key->getUri();
+
+        $attrs = new Attributes([$uri => [Literal::int(1), Literal::long(1)]], [$uri => $key]);
+
+        // Same lexical value, different datatype: distinct values, both kept.
+        $this->assertCount(2, $attrs);
+    }
+
+    public function testDedupeKeepsDistinctBlankNodeReferencesButCollapsesRepeats(): void
+    {
+        $key = $this->prov->qualifiedName('reference');
+        $uri = $key->getUri();
+        $blank = new ProvNamespace('_', '_:');
+        $b1 = new QualifiedName($blank, 'b1');
+        $b2 = new QualifiedName($blank, 'b2');
+
+        $attrs = new Attributes([$uri => [$b1, $b1, $b2]], [$uri => $key]);
+
+        // Distinct anonymous references stay distinct; the repeated one collapses.
+        $values = $attrs->get($key);
+        $this->assertCount(2, $values);
+        $this->assertSame([$b1, $b2], $values);
+    }
+
+    public function testWithDedupesViaConstructor(): void
+    {
+        $key = $this->prov->qualifiedName('type');
+
+        $attrs = new Attributes()
+            ->with($key, 'Document')
+            ->with($key, 'Document');
+
+        $this->assertSame(['Document'], $attrs->get($key));
+        $this->assertCount(1, $attrs);
+    }
+
+    public function testFromDedupesIdenticalPairs(): void
+    {
+        $key = $this->prov->qualifiedName('type');
+
+        $attrs = Attributes::from([[$key, 'Document'], [$key, 'Document'], [$key, 'Article']]);
+
+        $this->assertSame(['Document', 'Article'], $attrs->get($key));
     }
 }

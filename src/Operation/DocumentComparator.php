@@ -7,6 +7,7 @@ namespace Prov\Operation;
 use Prov\Activity;
 use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
+use Prov\Attribute\ValueIdentity;
 use Prov\Document;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\ProvRecord;
@@ -29,9 +30,6 @@ use Prov\Model\RelationMetadata;
  */
 final class DocumentComparator
 {
-    private const string XSD_STRING_URI = 'http://www.w3.org/2001/XMLSchema#string';
-    private const string XML_LITERAL_URI = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral';
-
     /**
      * Returns true if two Documents are semantically equivalent.
      */
@@ -338,57 +336,12 @@ final class DocumentComparator
         $pairs = [];
         foreach ($attrs->all() as $uri => $values) {
             foreach ($values as $value) {
-                $pairs[] = [$uri, self::valueSignature($value, $blankLabels)];
+                $pairs[] = [$uri, ValueIdentity::signature($value, $blankLabels)];
             }
         }
 
         sort($pairs);
         return $pairs;
-    }
-
-    /**
-     * @param array<string, string> $blankLabels
-     */
-    private static function valueSignature(
-        QualifiedName|Literal|string|int|float|bool $value,
-        array $blankLabels = [],
-    ): string {
-        if ($value instanceof QualifiedName) {
-            return 'qn:' . self::referenceUri($value, $blankLabels);
-        }
-        if ($value instanceof Literal) {
-            $datatype = $value->datatype !== null ? self::normalizeDatatypeUri($value->datatype->getUri()) : null;
-            // PROV-DM default: a literal without an explicit datatype and without a language
-            // tag is an xsd:string. Normalize so bare strings and xsd:string-typed literals
-            // sign identically regardless of format.
-            if ($datatype === null && $value->languageTag === null) {
-                return 'lit:' . $value->value . '^^' . self::XSD_STRING_URI;
-            }
-            $literalValue = $datatype === self::XML_LITERAL_URI
-                ? self::normalizeXmlLiteral($value->value)
-                : $value->value;
-            $sig = 'lit:' . $literalValue;
-            if ($datatype !== null) {
-                $sig .= '^^' . $datatype;
-            }
-            if ($value->languageTag !== null) {
-                $sig .= '@' . $value->languageTag;
-            }
-            return $sig;
-        }
-        if (is_string($value)) {
-            return 'lit:' . $value . '^^' . self::XSD_STRING_URI;
-        }
-        // Native scalars sign identically to the canonical xsd:* Literal a round-trip
-        // through PROV-N/XML produces, so a value stays equal across formats. The token is
-        // built inline to avoid allocating a Literal and QualifiedName on this hot path.
-        if (is_bool($value)) {
-            return 'lit:' . ($value ? 'true' : 'false') . '^^http://www.w3.org/2001/XMLSchema#boolean';
-        }
-        if (is_int($value)) {
-            return 'lit:' . $value . '^^http://www.w3.org/2001/XMLSchema#int';
-        }
-        return 'lit:' . Literal::formatFloat($value) . '^^http://www.w3.org/2001/XMLSchema#float';
     }
 
     /**
@@ -406,51 +359,6 @@ final class DocumentComparator
             return 'http://www.w3.org/ns/prov#' . substr($type, 5);
         }
         return $type;
-    }
-
-    /**
-     * The PROV-XML fixtures declare xsd: without a trailing `#` while PROV-JSON fixtures
-     * declare it with one. Both point at the same W3C XSD namespace. Normalize so
-     * `.../XMLSchemastring` and `.../XMLSchema#string` compare equal.
-     */
-    private static function normalizeDatatypeUri(string $uri): string
-    {
-        $withoutHash = 'http://www.w3.org/2001/XMLSchema';
-        if (str_starts_with($uri, $withoutHash) && !str_starts_with($uri, $withoutHash . '#')) {
-            return $withoutHash . '#' . substr($uri, strlen($withoutHash));
-        }
-        return $uri;
-    }
-
-    /**
-     * Strips inter-element whitespace from an rdf:XMLLiteral value so that the same
-     * XML fragment serialized compactly (PROV-JSON) or pretty-printed (PROV-XML)
-     * signs identically. Returns the input unchanged if it doesn't parse as XML.
-     */
-    private static function normalizeXmlLiteral(string $value): string
-    {
-        $previous = libxml_use_internal_errors(true);
-        try {
-            $doc = new \DOMDocument();
-            $doc->preserveWhiteSpace = false;
-            if (!$doc->loadXML('<r xmlns:_="_">' . $value . '</r>', LIBXML_NONET)) {
-                return $value;
-            }
-            $root = $doc->documentElement;
-            if ($root === null) {
-                return $value;
-            }
-            $out = '';
-            foreach ($root->childNodes as $child) {
-                if ($child instanceof \DOMNode) {
-                    $out .= $doc->saveXML($child) ?: '';
-                }
-            }
-            return $out;
-        } finally {
-            libxml_clear_errors();
-            libxml_use_internal_errors($previous);
-        }
     }
 
     /**
@@ -485,12 +393,12 @@ final class DocumentComparator
     private static function keySignature(mixed $key): string
     {
         if ($key instanceof QualifiedName || $key instanceof Literal) {
-            return self::valueSignature($key);
+            return ValueIdentity::signature($key);
         }
         if (is_string($key)) {
             // Bare string keys default to xsd:string in PROV-DM. Sign them like a Literal
             // so `"foo"` and `Literal("foo", xsd:string)` compare equal.
-            return self::valueSignature($key);
+            return ValueIdentity::signature($key);
         }
         if (is_array($key)) {
             // Typed-literal arrays from PROV-JSON: {"$": value, "type": datatype}
@@ -501,17 +409,17 @@ final class DocumentComparator
                 $type = isset($key['type']) && is_string($key['type']) ? $key['type'] : null;
 
                 if ($type === null && $lang === null) {
-                    return self::valueSignature($key['$']);
+                    return ValueIdentity::signature($key['$']);
                 }
                 if ($type === 'xsd:string' && $lang === null) {
-                    return self::valueSignature($key['$']);
+                    return ValueIdentity::signature($key['$']);
                 }
                 $sig = 'lit:' . $key['$'];
                 if ($type !== null && $type !== 'xsd:string') {
                     // Sign by full datatype URI, matching valueSignature(): a key
                     // typed `xsd:int` in PROV-JSON must compare equal to the same
                     // key as a Literal carrying the full XSD URI in another format.
-                    $sig .= '^^' . self::normalizeDatatypeUri(self::expandDatatypePrefix($type));
+                    $sig .= '^^' . ValueIdentity::normalizeDatatypeUri(self::expandDatatypePrefix($type));
                 }
                 if ($lang !== null) {
                     $sig .= '@' . $lang;
