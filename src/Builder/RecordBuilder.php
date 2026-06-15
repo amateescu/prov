@@ -710,13 +710,19 @@ abstract class RecordBuilder
     }
 
     /**
-     * Collects the full URI of every QualifiedName the records reference:
-     * identifiers, relation endpoints, attribute keys and values, literal
-     * datatypes, and dictionary entries.
+     * Collects the namespace URI behind every QualifiedName the records
+     * reference (identifiers, relation endpoints, attribute values, literal
+     * datatypes, dictionary entries), plus the full URI of each attribute key,
+     * into a deduplicated set for namespace pruning.
+     *
+     * A qualified name carries its namespace directly, so the namespace URI is
+     * taken from it rather than recomputed by concatenating the local part. The
+     * namespace URI still begins with any ancestor namespace's URI, so the
+     * `str_starts_with` test in `pruneNamespaces()` keeps a covering parent.
      *
      * Deliberately separate from `RelationMetadata::refEndpoints()`: this walks
-     * whole records (identifiers, attribute keys/values, datatypes) to a URI set
-     * for namespace pruning, not a relation's endpoints to a QualifiedName list.
+     * whole records (identifiers, attribute keys/values, datatypes), not a
+     * relation's endpoints to a QualifiedName list.
      *
      * @param list<\Prov\Model\ProvRecord> $records
      * @param array<string, true> $uris
@@ -727,15 +733,15 @@ abstract class RecordBuilder
     {
         foreach ($records as $record) {
             if ($record->identifier !== null) {
-                $uris[$record->identifier->getUri()] = true;
+                $uris[$record->identifier->namespace->uri] = true;
             }
             foreach ($record->attributes->all() as $keyUri => $values) {
                 $uris[$keyUri] = true;
                 foreach ($values as $value) {
                     if ($value instanceof QualifiedName) {
-                        $uris[$value->getUri()] = true;
+                        $uris[$value->namespace->uri] = true;
                     } elseif ($value instanceof Literal && $value->datatype !== null) {
-                        $uris[$value->datatype->getUri()] = true;
+                        $uris[$value->datatype->namespace->uri] = true;
                     }
                 }
             }
@@ -743,7 +749,7 @@ abstract class RecordBuilder
                 // @mago-expect analysis:mixed-assignment
                 foreach (RelationMetadata::extractFormals($record) as $value) {
                     if ($value instanceof QualifiedName) {
-                        $uris[$value->getUri()] = true;
+                        $uris[$value->namespace->uri] = true;
                     } elseif (is_array($value)) {
                         $uris = self::collectDictionaryUris($value, $uris);
                     }
@@ -766,14 +772,14 @@ abstract class RecordBuilder
         foreach ($items as $item) {
             if ($item instanceof DictionaryEntry) {
                 if ($item->entity !== null) {
-                    $uris[$item->entity->getUri()] = true;
+                    $uris[$item->entity->namespace->uri] = true;
                 }
                 $item = $item->key;
             }
             if ($item instanceof QualifiedName) {
-                $uris[$item->getUri()] = true;
+                $uris[$item->namespace->uri] = true;
             } elseif ($item instanceof Literal && $item->datatype !== null) {
-                $uris[$item->datatype->getUri()] = true;
+                $uris[$item->datatype->namespace->uri] = true;
             }
         }
         return $uris;

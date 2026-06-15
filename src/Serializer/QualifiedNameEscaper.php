@@ -39,6 +39,12 @@ final class QualifiedNameEscaper
      */
     public static function escape(string $local): string
     {
+        // Fast path: when the name carries none of the punctuation that could
+        // ever need escaping, a single C-level scan returns it untouched and
+        // skips the per-character loop. This is the common shape (e.g. `e123`).
+        if (strpbrk($local, self::ESCAPE_ALWAYS . '.-') === false) {
+            return $local;
+        }
         $out = '';
         $len = strlen($local);
         for ($i = 0; $i < $len; $i++) {

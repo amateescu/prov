@@ -119,7 +119,7 @@ class DocumentBuilder extends RecordBuilder
         if (!$this->keepUnusedNamespaces) {
             $usedUris = self::collectReferencedUris($this->records);
             foreach ($bundles as $bundle) {
-                $usedUris[$bundle->identifier->getUri()] = true;
+                $usedUris[$bundle->identifier->namespace->uri] = true;
                 $usedUris = self::collectReferencedUris($bundle->records, $usedUris);
             }
             $namespaces = self::pruneNamespaces($namespaces, $usedUris);
