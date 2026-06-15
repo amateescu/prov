@@ -630,4 +630,91 @@ final class DocumentBuilderTest extends TestCase
         $this->assertSame('_:b1', $first->uri);
         $this->assertSame('_:b2', $second->uri);
     }
+
+    public function testAutoDeclareEntitiesIsOffByDefault(): void
+    {
+        $this->builder->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1');
+
+        $doc = $this->builder->build();
+
+        // No bare Entity is minted for the referenced endpoint.
+        $this->assertSame([], $doc->entities);
+    }
+
+    public function testAutoDeclareEntitiesEmitsBareNodesForUndeclaredEndpoints(): void
+    {
+        $this->builder
+            ->autoDeclareEntities()
+            ->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1')
+            ->specializationOf(specificEntity: 'ex:e1', generalEntity: 'ex:e0');
+
+        $doc = $this->builder->build();
+
+        // e1 and e0 are declared once each; the activity is not an entity.
+        $ids = array_map(static fn($e): string => $e->identifier->localPart, $doc->entities);
+        $this->assertSame(['e1', 'e0'], $ids);
+        foreach ($doc->entities as $entity) {
+            $this->assertTrue($entity->attributes->isEmpty());
+        }
+    }
+
+    public function testAutoDeclareDoesNotDuplicateAlreadyDeclaredEntities(): void
+    {
+        $this->builder
+            ->autoDeclareEntities()
+            ->entity('ex:e1', ['prov:type' => 'ex:Thing'])
+            ->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1');
+
+        $doc = $this->builder->build();
+
+        // The explicit, attributed e1 is kept; no bare duplicate is appended.
+        $this->assertCount(1, $doc->entities);
+        $this->assertFalse($doc->entities[0]->attributes->isEmpty());
+    }
+
+    public function testAutoDeclareDoesNotMintForNonEntityEndpoints(): void
+    {
+        $this->builder->autoDeclareEntities()->wasAssociatedWith(activity: 'ex:a1', agent: 'ex:ag1');
+
+        $doc = $this->builder->build();
+
+        // Neither the activity nor the agent endpoint is entity-typed.
+        $this->assertSame([], $doc->entities);
+    }
+
+    public function testAutoDeclareMintsPlanEndpointOfAssociation(): void
+    {
+        $this->builder->autoDeclareEntities()->wasAssociatedWith(activity: 'ex:a1', agent: 'ex:ag1', plan: 'ex:plan1');
+
+        $doc = $this->builder->build();
+
+        // The plan is the one entity-typed endpoint of an association.
+        $this->assertCount(1, $doc->entities);
+        $this->assertSame('plan1', $doc->entities[0]->identifier->localPart);
+    }
+
+    public function testAutoDeclareSkipsBlankNodeEndpoints(): void
+    {
+        $blank = $this->builder->blank();
+        $this->builder->autoDeclareEntities()->wasGeneratedBy(entity: $blank, activity: 'ex:a1');
+
+        $doc = $this->builder->build();
+
+        $this->assertSame([], $doc->entities);
+    }
+
+    public function testAutoDeclarePropagatesToBundles(): void
+    {
+        $this->builder->autoDeclareEntities();
+        $this->builder->withBundle('ex:b1', static function ($bundle): void {
+            $bundle->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1');
+        });
+
+        $doc = $this->builder->build();
+
+        $this->assertSame(
+            ['e1'],
+            array_map(static fn($e): string => $e->identifier->localPart, $doc->bundles[0]->entities),
+        );
+    }
 }

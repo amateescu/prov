@@ -69,6 +69,9 @@ class DocumentBuilder extends RecordBuilder
         if ($this->keepUnusedNamespaces) {
             $bundleBuilder->keepUnusedNamespaces();
         }
+        if ($this->autoDeclareEntities) {
+            $bundleBuilder->autoDeclareEntities();
+        }
         $this->bundles[] = $bundleBuilder->build();
         return $this;
     }
@@ -107,24 +110,32 @@ class DocumentBuilder extends RecordBuilder
     {
         $this->markBuilt();
 
+        $records = $this->records;
+        if ($this->autoDeclareEntities) {
+            $records = [...$records, ...self::autoDeclaredEntities($records)];
+        }
+
         $bundles = $this->bundles;
         foreach ($this->bundleBuilders as $bb) {
             if ($this->keepUnusedNamespaces) {
                 $bb->keepUnusedNamespaces();
+            }
+            if ($this->autoDeclareEntities) {
+                $bb->autoDeclareEntities();
             }
             $bundles[] = $bb->build();
         }
 
         $namespaces = $this->namespaceManager->getRegisteredNamespaces();
         if (!$this->keepUnusedNamespaces) {
-            $usedUris = self::collectReferencedUris($this->records);
+            $usedUris = self::collectReferencedUris($records);
             foreach ($bundles as $bundle) {
-                $usedUris[$bundle->identifier->getUri()] = true;
+                $usedUris[$bundle->identifier->namespace->uri] = true;
                 $usedUris = self::collectReferencedUris($bundle->records, $usedUris);
             }
             $namespaces = self::pruneNamespaces($namespaces, $usedUris);
         }
 
-        return new Document(records: $this->records, bundles: $bundles, namespaces: $namespaces);
+        return new Document(records: $records, bundles: $bundles, namespaces: $namespaces);
     }
 }

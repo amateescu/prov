@@ -35,6 +35,7 @@ class ProvNSerializer implements ProvSerializerInterface
     public function __construct(
         public readonly int $indentation = 2,
         public readonly bool $includeDefaultNamespace = true,
+        public readonly bool $sortRecords = false,
     ) {
         $this->indentPrefix = str_repeat(' ', $this->indentation);
     }
@@ -63,7 +64,8 @@ class ProvNSerializer implements ProvSerializerInterface
         // The body is rendered before the prefix block so that namespaces minted
         // for undeclared attribute keys can still be declared in the header.
         $bodyLines = [];
-        foreach ($document->records as $record) {
+        $records = $this->sortRecords ? OutputOrder::records($document->records) : $document->records;
+        foreach ($records as $record) {
             $line = $this->serializeRecord($record, $nsManager);
             if ($line !== null) {
                 $bodyLines[] = $indent . $line;
@@ -78,7 +80,8 @@ class ProvNSerializer implements ProvSerializerInterface
         $lines = [];
         $lines[] = 'document';
 
-        foreach ($document->namespaces as $ns) {
+        $namespaces = OutputOrder::namespaces([...$document->namespaces, ...$minter->getMintedNamespaces()]);
+        foreach ($namespaces as $ns) {
             $this->assertSafeNamespace($ns);
             if ($ns->prefix === 'default') {
                 if ($this->includeDefaultNamespace) {
@@ -88,12 +91,8 @@ class ProvNSerializer implements ProvSerializerInterface
                 $lines[] = $indent . "prefix {$ns->prefix} <{$ns->uri}>";
             }
         }
-        foreach ($minter->getMintedNamespaces() as $ns) {
-            $this->assertSafeNamespace($ns);
-            $lines[] = $indent . "prefix {$ns->prefix} <{$ns->uri}>";
-        }
 
-        if ($document->namespaces !== [] || $minter->getMintedNamespaces() !== []) {
+        if ($namespaces !== []) {
             $lines[] = '';
         }
 
@@ -119,7 +118,7 @@ class ProvNSerializer implements ProvSerializerInterface
         $indent2 = $indent . $indent;
         $lines[] = $indent . 'bundle ' . $this->formatQualifiedName($bundle->identifier);
 
-        foreach ($bundle->namespaces as $ns) {
+        foreach (OutputOrder::namespaces($bundle->namespaces) as $ns) {
             $this->assertSafeNamespace($ns);
             if ($ns->prefix === 'default') {
                 if ($this->includeDefaultNamespace) {
@@ -134,7 +133,8 @@ class ProvNSerializer implements ProvSerializerInterface
             $lines[] = '';
         }
 
-        foreach ($bundle->records as $record) {
+        $records = $this->sortRecords ? OutputOrder::records($bundle->records) : $bundle->records;
+        foreach ($records as $record) {
             $line = $this->serializeRecord($record, $nsManager);
             if ($line !== null) {
                 $lines[] = $indent2 . $line;

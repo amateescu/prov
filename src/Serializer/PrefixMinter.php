@@ -26,6 +26,9 @@ final class PrefixMinter
     /** @var array<string, \Prov\Identifier\ProvNamespace> Minted namespaces by namespace URI. */
     private array $minted = [];
 
+    /** @var array<string, string> Resolved prefixFor() results keyed by "prefix\0uri". */
+    private array $prefixForCache = [];
+
     /**
      * @param \Prov\Identifier\NamespaceManager $documentManager
      *   The document-level manager that minted namespaces are registered on.
@@ -84,6 +87,24 @@ final class PrefixMinter
     {
         $ns = $qn->namespace;
 
+        // Once resolved, a given (prefix, uri) always reproduces the same
+        // answer because the resolution guarantees a matching declaration; the
+        // same names recur across every record, so cache by that pair.
+        $cacheKey = $ns->prefix . "\0" . $ns->uri;
+        $cached = $this->prefixForCache[$cacheKey] ?? null;
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        return $this->prefixForCache[$cacheKey] = $this->resolvePrefix($ns);
+    }
+
+    /**
+     * Computes the prefix for a namespace, declaring or minting as needed. The
+     * uncached body of prefixFor().
+     */
+    private function resolvePrefix(ProvNamespace $ns): string
+    {
         if ($ns->prefix !== 'default') {
             $existing = $this->documentManager->getNamespace($ns->prefix);
             if ($existing !== null && $existing->uri === $ns->uri) {

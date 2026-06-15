@@ -89,6 +89,8 @@ abstract class RecordBuilder
 
     protected bool $keepUnusedNamespaces = false;
 
+    protected bool $autoDeclareEntities = false;
+
     private int $blankNodeCounter = 0;
 
     /**
@@ -173,6 +175,23 @@ abstract class RecordBuilder
     public function keepUnusedNamespaces(): static
     {
         $this->keepUnusedNamespaces = true;
+        return $this;
+    }
+
+    /**
+     * At `build()`, emit a bare `Entity` record for any entity-typed relation
+     * endpoint that no record already declares, so a consumer that wants every
+     * referenced node to appear in the document need not hand-declare each one.
+     * Off by default, so the built container is unchanged unless this is set.
+     *
+     * Only entity-typed endpoints qualify (a relation's activity, agent, event,
+     * and bundle references are left alone), blank-node endpoints are skipped,
+     * and an endpoint already carried by a record (of any type) is never
+     * duplicated. Call before creating bundles so they inherit the choice.
+     */
+    public function autoDeclareEntities(): static
+    {
+        $this->autoDeclareEntities = true;
         return $this;
     }
 
@@ -688,6 +707,45 @@ abstract class RecordBuilder
     // --- Internal helpers ---
 
     /**
+     * Bare `Entity` records for the entity-typed relation endpoints in
+     * `$records` that no record there already declares. Blank-node endpoints
+     * are skipped, an endpoint declared by a record of any type is left alone
+     * (so no duplicate-identifier record is minted), and each new entity is
+     * emitted once, in first-referenced order.
+     *
+     * @param list<\Prov\Model\ProvRecord> $records
+     *
+     * @return list<\Prov\Entity>
+     */
+    protected static function autoDeclaredEntities(array $records): array
+    {
+        $declared = [];
+        foreach ($records as $record) {
+            if ($record->identifier !== null) {
+                $declared[$record->identifier->getUri()] = true;
+            }
+        }
+
+        $entities = [];
+        $seen = [];
+        foreach ($records as $record) {
+            if (!$record instanceof ProvRelation) {
+                continue;
+            }
+            foreach (RelationMetadata::entityEndpoints($record) as $endpoint) {
+                $entity = $endpoint['entity'];
+                $uri = $entity->getUri();
+                if ($entity->isBlank() || isset($declared[$uri]) || isset($seen[$uri])) {
+                    continue;
+                }
+                $seen[$uri] = true;
+                $entities[] = new Entity(identifier: $entity, attributes: Attributes::empty());
+            }
+        }
+        return $entities;
+    }
+
+    /**
      * Filters namespaces down to those covering at least one referenced URI.
      *
      * @param list<\Prov\Identifier\ProvNamespace> $namespaces
@@ -710,13 +768,19 @@ abstract class RecordBuilder
     }
 
     /**
-     * Collects the full URI of every QualifiedName the records reference:
-     * identifiers, relation endpoints, attribute keys and values, literal
-     * datatypes, and dictionary entries.
+     * Collects the namespace URI behind every QualifiedName the records
+     * reference (identifiers, relation endpoints, attribute values, literal
+     * datatypes, dictionary entries), plus the full URI of each attribute key,
+     * into a deduplicated set for namespace pruning.
+     *
+     * A qualified name carries its namespace directly, so the namespace URI is
+     * taken from it rather than recomputed by concatenating the local part. The
+     * namespace URI still begins with any ancestor namespace's URI, so the
+     * `str_starts_with` test in `pruneNamespaces()` keeps a covering parent.
      *
      * Deliberately separate from `RelationMetadata::refEndpoints()`: this walks
-     * whole records (identifiers, attribute keys/values, datatypes) to a URI set
-     * for namespace pruning, not a relation's endpoints to a QualifiedName list.
+     * whole records (identifiers, attribute keys/values, datatypes), not a
+     * relation's endpoints to a QualifiedName list.
      *
      * @param list<\Prov\Model\ProvRecord> $records
      * @param array<string, true> $uris
@@ -727,15 +791,15 @@ abstract class RecordBuilder
     {
         foreach ($records as $record) {
             if ($record->identifier !== null) {
-                $uris[$record->identifier->getUri()] = true;
+                $uris[$record->identifier->namespace->uri] = true;
             }
             foreach ($record->attributes->all() as $keyUri => $values) {
                 $uris[$keyUri] = true;
                 foreach ($values as $value) {
                     if ($value instanceof QualifiedName) {
-                        $uris[$value->getUri()] = true;
+                        $uris[$value->namespace->uri] = true;
                     } elseif ($value instanceof Literal && $value->datatype !== null) {
-                        $uris[$value->datatype->getUri()] = true;
+                        $uris[$value->datatype->namespace->uri] = true;
                     }
                 }
             }
@@ -743,7 +807,7 @@ abstract class RecordBuilder
                 // @mago-expect analysis:mixed-assignment
                 foreach (RelationMetadata::extractFormals($record) as $value) {
                     if ($value instanceof QualifiedName) {
-                        $uris[$value->getUri()] = true;
+                        $uris[$value->namespace->uri] = true;
                     } elseif (is_array($value)) {
                         $uris = self::collectDictionaryUris($value, $uris);
                     }
@@ -766,14 +830,14 @@ abstract class RecordBuilder
         foreach ($items as $item) {
             if ($item instanceof DictionaryEntry) {
                 if ($item->entity !== null) {
-                    $uris[$item->entity->getUri()] = true;
+                    $uris[$item->entity->namespace->uri] = true;
                 }
                 $item = $item->key;
             }
             if ($item instanceof QualifiedName) {
-                $uris[$item->getUri()] = true;
+                $uris[$item->namespace->uri] = true;
             } elseif ($item instanceof Literal && $item->datatype !== null) {
-                $uris[$item->datatype->getUri()] = true;
+                $uris[$item->datatype->namespace->uri] = true;
             }
         }
         return $uris;

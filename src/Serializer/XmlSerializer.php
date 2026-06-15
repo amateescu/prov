@@ -58,6 +58,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
 
     public function __construct(
         public readonly bool $prettyPrint = true,
+        public readonly bool $sortRecords = false,
     ) {}
 
     private ?PrefixMinter $minter = null;
@@ -92,7 +93,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:xsd', self::XSD_NS);
 
         $nsManager = new NamespaceManager();
-        foreach ($document->namespaces as $ns) {
+        foreach (OutputOrder::namespaces($document->namespaces) as $ns) {
             if ($ns->prefix === 'prov' || $ns->prefix === 'xsd') {
                 $nsManager->addOrReplace($ns);
                 continue;
@@ -112,7 +113,8 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $minter = new PrefixMinter($nsManager);
         $this->minter = $minter;
 
-        foreach ($document->records as $record) {
+        $records = $this->sortRecords ? OutputOrder::records($document->records) : $document->records;
+        foreach ($records as $record) {
             $this->serializeRecord($dom, $root, $record, $nsManager);
         }
 
@@ -484,7 +486,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         // bundleContent default stays the document's, keeping the bundle's own
         // prov:id (which lives in the parent scope) resolvable as a bare name.
         $bundleNsManager = new NamespaceManager($nsManager);
-        foreach ($bundle->namespaces as $ns) {
+        foreach (OutputOrder::namespaces($bundle->namespaces) as $ns) {
             $existing = $nsManager->getNamespace($ns->prefix);
             if ($existing !== null && $existing->uri === $ns->uri) {
                 continue;
@@ -499,7 +501,8 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             $bundleNsManager->addOrReplace($ns);
         }
 
-        foreach ($bundle->records as $record) {
+        $records = $this->sortRecords ? OutputOrder::records($bundle->records) : $bundle->records;
+        foreach ($records as $record) {
             $this->serializeRecord($dom, $el, $record, $bundleNsManager);
         }
 

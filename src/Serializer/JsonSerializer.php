@@ -62,10 +62,16 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     /** @var array<string, true> Blank labels the document already uses. */
     private array $usedBlankLabels = [];
 
+    /** Set once the used-blank-label scan has run for the current document. */
+    private bool $blankLabelsCollected = false;
+
+    private ?Document $currentDocument = null;
+
     private ?PrefixMinter $minter = null;
 
     public function __construct(
         public readonly bool $prettyPrint = false,
+        public readonly bool $sortRecords = false,
     ) {
         $this->blankNodes = new \WeakMap();
     }
@@ -81,7 +87,11 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     {
         $this->blankNodes = new \WeakMap();
         $this->blankNodeCounter = 0;
-        $this->collectUsedBlankLabels($document);
+        // The used-label scan is a full extra pass; defer it until a blank id is
+        // actually minted, which never happens for a fully-identified document.
+        $this->currentDocument = $document;
+        $this->blankLabelsCollected = false;
+        $this->usedBlankLabels = [];
 
         $nsManager = new NamespaceManager();
         foreach ($document->namespaces as $ns) {
@@ -113,7 +123,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $bundleData = [];
             $bundlePrefixes = $this->serializePrefixes($bundle->namespaces, $document->namespaces);
             if ($bundlePrefixes !== []) {
-                $bundleData['prefix'] = $bundlePrefixes;
+                $bundleData['prefix'] = OutputOrder::prefixMap($bundlePrefixes);
             }
             $this->serializeRecords($bundle->records, $bundleData, $bundleNsManager);
             if (isset($output['bundle'][$bundleKey])) {
@@ -135,6 +145,8 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         // the document object never carries an array-valued 'prefix'.
         if ($output['prefix'] === []) {
             unset($output['prefix']);
+        } else {
+            $output['prefix'] = OutputOrder::prefixMap($output['prefix']);
         }
 
         $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION;
@@ -156,6 +168,11 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
      */
     private function mintBlankLabel(): string
     {
+        if (!$this->blankLabelsCollected) {
+            assert($this->currentDocument !== null);
+            $this->collectUsedBlankLabels($this->currentDocument);
+            $this->blankLabelsCollected = true;
+        }
         do {
             $label = '_:b' . ++$this->blankNodeCounter;
         } while (isset($this->usedBlankLabels[$label]));
@@ -171,13 +188,15 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         }
         foreach ($records as $record) {
             $id = $record->identifier;
-            if ($id !== null && $id->isBlank()) {
-                $labels[$id->getUri()] = true;
+            if ($id !== null && str_starts_with($id->uri, '_:')) {
+                $labels[$id->uri] = true;
             }
             if ($record instanceof ProvRelation) {
                 foreach (RelationMetadata::extractFormals($record) as $value) {
-                    if ($value instanceof QualifiedName && $value->isBlank()) {
-                        $labels[$value->getUri()] = true;
+                    if ($value instanceof QualifiedName) {
+                        if (str_starts_with($value->uri, '_:')) {
+                            $labels[$value->uri] = true;
+                        }
                     } elseif (is_array($value)) {
                         $this->collectBlankDictionaryLabels($value, $labels);
                     }
@@ -185,7 +204,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             }
             foreach ($record->attributes->all() as $values) {
                 foreach ($values as $value) {
-                    if ($value instanceof QualifiedName && $value->isBlank()) {
+                    if ($value instanceof QualifiedName && str_starts_with($value->uri, '_:')) {
                         $labels[$value->getUri()] = true;
                     }
                 }
@@ -325,6 +344,9 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
      */
     private function serializeRecords(array $records, array &$output, NamespaceManager $nsManager): void
     {
+        if ($this->sortRecords) {
+            $records = OutputOrder::records($records);
+        }
         foreach ($records as $record) {
             match (true) {
                 $record instanceof Entity => $this->serializeElement($record, 'entity', $output, $nsManager),
@@ -625,22 +647,31 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
      */
     private function jsonQName(QualifiedName $qn): string
     {
-        $local = QualifiedNameEscaper::escape($qn->localPart);
+        $prefix = $qn->namespace->prefix;
 
         // A default-namespace name is written bare; a blank-node label keeps its
-        // reserved "_" prefix. Neither needs (or can take) a declaration.
-        if ($qn->namespace->prefix === 'default') {
-            return $local;
+        // reserved "_" prefix. Neither needs (or can take) a declaration. The
+        // blank test is inlined as a direct prefix scan to avoid a method call
+        // on this per-qualified-name hot path.
+        if ($prefix === 'default') {
+            return QualifiedNameEscaper::escape($qn->localPart);
         }
-        if ($qn->isBlank()) {
-            return $qn->namespace->prefix . ':' . $local;
+        if ($prefix === '_' || str_starts_with($qn->uri, '_:')) {
+            return $prefix . ':' . QualifiedNameEscaper::escape($qn->localPart);
         }
 
         // Route through the minter so an otherwise-undeclared namespace gets a
         // declaration emitted in the prefix map.
-        $prefix = $this->minter !== null ? $this->minter->prefixFor($qn) : $qn->namespace->prefix;
+        $resolved = $this->minter !== null ? $this->minter->prefixFor($qn) : $prefix;
+        $local = QualifiedNameEscaper::escape($qn->localPart);
 
-        return $prefix . ':' . $local;
+        // When the prefix is unchanged and the local part needed no escaping the
+        // result is exactly the precomputed string form; reuse it rather than
+        // allocate an identical "prefix:local" string for every record and ref.
+        if ($resolved === $prefix && $local === $qn->localPart) {
+            return (string) $qn;
+        }
+        return $resolved . ':' . $local;
     }
 
     /**
@@ -664,6 +695,11 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     private function resolveQName(string $raw, NamespaceManager $nsManager): QualifiedName
     {
         $qn = $nsManager->resolve($raw);
+        // An escape can only be present if the raw string carried a backslash;
+        // skip the decode pass (and its allocation) for the common bare name.
+        if (!str_contains($raw, '\\')) {
+            return $qn;
+        }
         $decoded = QualifiedNameEscaper::decode($qn->localPart);
         if ($decoded === $qn->localPart) {
             return $qn;

@@ -25,19 +25,72 @@ use Prov\Identifier\QualifiedName;
 readonly class Attributes implements \Countable, \IteratorAggregate
 {
     /**
-     * @param array<string, list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool>> $data
+     * @var array<string, list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool>>
      *   Values keyed by the full URI of their attribute key.
-     * @param array<string, \Prov\Identifier\QualifiedName> $keys
+     */
+    private array $data;
+
+    /**
+     * @var array<string, \Prov\Identifier\QualifiedName>
      *   QualifiedName key objects, keyed by the same URIs as $data. Entries may
      *   be omitted; `keys()` and iteration then derive a QualifiedName from the
      *   URI itself, minting a prefix. All library construction paths populate
      *   this map, so original prefixes are preserved unless an instance is
      *   constructed directly from raw URI-keyed data.
      */
-    public function __construct(
-        private array $data = [],
-        private array $keys = [],
-    ) {}
+    private array $keys;
+
+    /**
+     * PROV-DM models a record's attributes as a set of attribute-value pairs, so
+     * identical pairs are collapsed here: any key holding more than one value is
+     * deduplicated by canonical value identity, keeping the first occurrence.
+     * Deduplicating in the constructor (rather than only in `with()`/`from()`)
+     * makes the set semantics hold for every construction path, including the
+     * deserializers that build directly via `new Attributes(...)`. Single-valued
+     * keys (the common case) skip the work entirely.
+     *
+     * @param array<string, list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool>> $data
+     *   Values keyed by the full URI of their attribute key.
+     * @param array<string, \Prov\Identifier\QualifiedName> $keys
+     *   QualifiedName key objects, keyed by the same URIs as $data.
+     */
+    public function __construct(array $data = [], array $keys = [])
+    {
+        foreach ($data as $uri => $values) {
+            if (count($values) > 1) {
+                $data[$uri] = self::dedupeValues($values);
+            }
+        }
+        $this->data = $data;
+        $this->keys = $keys;
+    }
+
+    /**
+     * Collapses values that share a canonical identity, keeping the first
+     * occurrence. Identity comes from `\Prov\Attribute\ValueIdentity`, so a bare
+     * scalar and the typed Literal it round-trips to count as one value, and the
+     * dedup agrees with `\Prov\Operation\DocumentComparator`'s equality. Blank-node
+     * references dedup by their raw `_:bN` URI, so distinct anonymous references
+     * stay distinct.
+     *
+     * @param list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool> $values
+     *
+     * @return list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool>
+     */
+    private static function dedupeValues(array $values): array
+    {
+        $seen = [];
+        $out = [];
+        foreach ($values as $value) {
+            $signature = ValueIdentity::signature($value);
+            if (isset($seen[$signature])) {
+                continue;
+            }
+            $seen[$signature] = true;
+            $out[] = $value;
+        }
+        return $out;
+    }
 
     /**
      * Shared empty instance. Safe to reuse because Attributes is immutable.
@@ -59,32 +112,6 @@ readonly class Attributes implements \Countable, \IteratorAggregate
         $keys = $this->keys;
         $data[$uri][] = $value;
         $keys[$uri] ??= $key;
-        return new self($data, $keys);
-    }
-
-    /**
-     * Returns a new Attributes instance with every value of `$other` appended.
-     *
-     * Because the bag is a multimap, a key present in both instances keeps all
-     * of its values: the merge appends rather than overwrites, promoting a
-     * single value to multiple under the same key. Key objects already present
-     * win; otherwise `$other`'s key object is carried over.
-     */
-    public function merge(self $other): self
-    {
-        if ($other->data === []) {
-            return $this;
-        }
-        $data = $this->data;
-        $keys = $this->keys;
-        foreach ($other->data as $uri => $values) {
-            foreach ($values as $value) {
-                $data[$uri][] = $value;
-            }
-            if (!isset($keys[$uri]) && isset($other->keys[$uri])) {
-                $keys[$uri] = $other->keys[$uri];
-            }
-        }
         return new self($data, $keys);
     }
 
