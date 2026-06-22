@@ -9,6 +9,8 @@ use Prov\Builder\DocumentBuilder;
 use Prov\Document;
 use Prov\Entity;
 use Prov\Identifier\ProvNamespace;
+use Prov\Identifier\QualifiedName;
+use Prov\Model\AgentInvolvement;
 use Prov\Operation\ProvGraph;
 use Prov\Relation\Association;
 use Prov\Relation\Derivation;
@@ -286,5 +288,210 @@ final class ProvGraphTest extends TestCase
 
         $graph = new ProvGraph($doc);
         $this->assertNotNull($graph->recordByIdentifier($thing->getUri()));
+    }
+
+    /**
+     * @param list<\Prov\Identifier\QualifiedName> $identifiers
+     *
+     * @return list<string>
+     */
+    private static function localParts(array $identifiers): array
+    {
+        return array_map(static fn(QualifiedName $qn) => $qn->localPart, $identifiers);
+    }
+
+    public function testAgentsOfEmptyWhenActivityHasNoAssociations(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->activity('ex:run');
+        $graph = new ProvGraph($builder->build());
+
+        $this->assertSame([], $graph->agentsOf('ex:run'));
+    }
+
+    public function testAgentsOfSingleAgentWithoutDelegation(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:bot');
+        $graph = new ProvGraph($builder->build());
+
+        $agents = $graph->agentsOf('ex:run');
+        $this->assertCount(1, $agents);
+        $this->assertInstanceOf(AgentInvolvement::class, $agents[0]);
+        $this->assertSame('bot', $agents[0]->agent->localPart);
+        $this->assertNull($agents[0]->plan);
+        $this->assertSame([], $agents[0]->onBehalfOf);
+    }
+
+    public function testAgentsOfFollowsSingleDelegationHop(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:bot');
+        $builder->actedOnBehalfOf(delegate: 'ex:bot', responsible: 'ex:alice');
+        $graph = new ProvGraph($builder->build());
+
+        $agents = $graph->agentsOf('ex:run');
+        $this->assertCount(1, $agents);
+        $this->assertSame(['alice'], self::localParts($agents[0]->onBehalfOf));
+    }
+
+    public function testAgentsOfFollowsMultiLevelChainInOrder(): void
+    {
+        // bot -> alice is scoped to ex:run (the queried activity), alice -> acme
+        // is unscoped; both are followed, nearest responsible first.
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:bot');
+        $builder->actedOnBehalfOf(delegate: 'ex:bot', responsible: 'ex:alice', activity: 'ex:run');
+        $builder->actedOnBehalfOf(delegate: 'ex:alice', responsible: 'ex:acme');
+        $graph = new ProvGraph($builder->build());
+
+        $agents = $graph->agentsOf('ex:run');
+        $this->assertSame(['alice', 'acme'], self::localParts($agents[0]->onBehalfOf));
+    }
+
+    public function testAgentsOfTerminatesOnCycle(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:bot');
+        $builder->actedOnBehalfOf(delegate: 'ex:bot', responsible: 'ex:alice');
+        $builder->actedOnBehalfOf(delegate: 'ex:alice', responsible: 'ex:bot');
+        $graph = new ProvGraph($builder->build());
+
+        // The walk stops once it would revisit ex:bot: alice is listed once,
+        // with no repeat and no infinite loop.
+        $agents = $graph->agentsOf('ex:run');
+        $this->assertSame(['alice'], self::localParts($agents[0]->onBehalfOf));
+    }
+
+    public function testAgentsOfReturnsEntryPerAssociatedAgentInOrder(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:bot');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:alice');
+        $graph = new ProvGraph($builder->build());
+
+        $agents = $graph->agentsOf('ex:run');
+        $this->assertSame(
+            ['bot', 'alice'],
+            self::localParts(array_map(static fn(AgentInvolvement $involvement) => $involvement->agent, $agents)),
+        );
+    }
+
+    public function testAgentsOfSurfacesPlanAndAttributes(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:bot', plan: 'ex:recipe', attributes: [
+            'prov:role' => 'executor',
+        ]);
+        $graph = new ProvGraph($builder->build());
+
+        $agents = $graph->agentsOf('ex:run');
+        $this->assertSame('recipe', $agents[0]->plan?->localPart);
+        $this->assertCount(1, $agents[0]->attributes);
+        $role = iterator_to_array($agents[0]->attributes, false);
+        $this->assertSame('executor', $role[0]);
+    }
+
+    public function testAgentsOfExcludesDelegationScopedToAnotherActivity(): void
+    {
+        // bot -> alice holds only within ex:other, so it is absent from the
+        // ex:run chain while the unscoped bot -> acme link still applies.
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:bot');
+        $builder->actedOnBehalfOf(delegate: 'ex:bot', responsible: 'ex:alice', activity: 'ex:other');
+        $builder->actedOnBehalfOf(delegate: 'ex:bot', responsible: 'ex:acme');
+        $graph = new ProvGraph($builder->build());
+
+        $agents = $graph->agentsOf('ex:run');
+        $this->assertSame(['acme'], self::localParts($agents[0]->onBehalfOf));
+    }
+
+    public function testAgentsOfSkipsAssociationWithNullAgent(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: null, plan: 'ex:recipe');
+        $graph = new ProvGraph($builder->build());
+
+        $this->assertSame([], $graph->agentsOf('ex:run'));
+    }
+
+    public function testAgentsOfAcceptsAllIdentifierForms(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:bot');
+        $document = $builder->build();
+        $graph = new ProvGraph($document);
+
+        $byShorthand = $graph->agentsOf('ex:run');
+        $byUri = $graph->agentsOf('http://example.org/run');
+        $activityQn = $document->getRecordsByType(Association::class)[0]->activity;
+        $this->assertNotNull($activityQn);
+        $byQn = $graph->agentsOf($activityQn);
+
+        $this->assertSame(
+            self::localParts(array_map(static fn(AgentInvolvement $i) => $i->agent, $byShorthand)),
+            self::localParts(array_map(static fn(AgentInvolvement $i) => $i->agent, $byUri)),
+        );
+        $this->assertSame(
+            self::localParts(array_map(static fn(AgentInvolvement $i) => $i->agent, $byShorthand)),
+            self::localParts(array_map(static fn(AgentInvolvement $i) => $i->agent, $byQn)),
+        );
+        $this->assertCount(1, $byQn);
+    }
+
+    public function testAgentsOfIgnoresNonAssociationSubjectRelations(): void
+    {
+        // ex:run is the subject of a usage and a start but no association, so
+        // the instanceof filter yields no agents.
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->used(activity: 'ex:run', entity: 'ex:draft');
+        $builder->wasStartedBy(activity: 'ex:run', trigger: 'ex:trigger');
+        $graph = new ProvGraph($builder->build());
+
+        $this->assertSame([], $graph->agentsOf('ex:run'));
+    }
+
+    public function testAgentsOfScansPastNonAssociationSubjectRelations(): void
+    {
+        // The non-association start sorts before the association in record
+        // order, so a matching association is still found only because the
+        // filter skips the start rather than stopping the scan at it.
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasStartedBy(activity: 'ex:run', trigger: 'ex:trigger');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:bot');
+        $graph = new ProvGraph($builder->build());
+
+        $agents = $graph->agentsOf('ex:run');
+        $this->assertSame(
+            ['bot'],
+            self::localParts(array_map(static fn(AgentInvolvement $involvement) => $involvement->agent, $agents)),
+        );
+    }
+
+    public function testAgentsOfFollowsFirstDelegationWhenHopHasSeveral(): void
+    {
+        // bot delegates to both alice and carol; the chain follows the first in
+        // record order and does not collapse the hop into the last one.
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasAssociatedWith(activity: 'ex:run', agent: 'ex:bot');
+        $builder->actedOnBehalfOf(delegate: 'ex:bot', responsible: 'ex:alice');
+        $builder->actedOnBehalfOf(delegate: 'ex:bot', responsible: 'ex:carol');
+        $graph = new ProvGraph($builder->build());
+
+        $agents = $graph->agentsOf('ex:run');
+        $this->assertSame(['alice'], self::localParts($agents[0]->onBehalfOf));
     }
 }
