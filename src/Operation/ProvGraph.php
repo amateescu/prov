@@ -9,16 +9,25 @@ use Prov\Document;
 use Prov\Exception\NamespaceException;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\QualifiedName;
+use Prov\Model\AgentInvolvement;
 use Prov\Model\ProvRecord;
 use Prov\Model\ProvRelation;
 use Prov\Model\RelationMetadata;
+use Prov\Relation\Association;
+use Prov\Relation\Delegation;
 use Prov\Relation\Generation;
 use Prov\Relation\Usage;
 
 /**
- * Read-side query API over the records of a Document or Bundle: follow
- * relation edges from or to an identifier without hand-rolling instanceof
- * scans over `$relations`.
+ * An indexed adjacency view over the records of a Document or Bundle: look up
+ * a record by identifier, and follow relation edges from or to an identifier
+ * without hand-rolling instanceof scans over `$relations`.
+ *
+ * Queries are single-hop. This is an edge-lookup index, not a graph-analysis
+ * toolkit: it does no transitive traversal, pathfinding, or lineage walking.
+ * For an entity's full ancestry, walk the edges yourself starting from
+ * `relationsReferencing()`, or reach for a composed helper like `agentsOf()`
+ * where one fits.
  *
  * The graph indexes every record and relation endpoint by URI once, at
  * construction, so lookups are O(1) in the number of records. Identifiers
@@ -197,6 +206,80 @@ final class ProvGraph
             }
         }
         return $out;
+    }
+
+    /**
+     * The agents an activity was associated with, each with its plan, the
+     * association's attributes, and its actedOnBehalfOf chain.
+     *
+     * One entry per Association whose activity is the given one. Associations
+     * with no agent are skipped. The result reports identifiers and structure
+     * only: classifying an agent (person, software agent, ...) is the caller's
+     * job, read from the agent record's prov:type via recordByIdentifier().
+     *
+     * @return list<\Prov\Model\AgentInvolvement>
+     */
+    public function agentsOf(QualifiedName|string $activity): array
+    {
+        $activityUri = $this->toUri($activity);
+        $out = [];
+        foreach ($this->relationsFrom($activityUri) as $relation) {
+            if (
+                !$relation instanceof Association
+                || $relation->agent === null
+                || $relation->activity?->getUri() !== $activityUri
+            ) {
+                continue;
+            }
+            $out[] = new AgentInvolvement(
+                agent: $relation->agent,
+                plan: $relation->plan,
+                attributes: $relation->attributes,
+                onBehalfOf: $this->delegationChain($relation->agent, $activityUri),
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * Follows actedOnBehalfOf from an agent outward (delegate -> responsible),
+     * nearest first. Stops at the first agent with no further delegation,
+     * guards against cycles, and honors an activity-scoped delegation only when
+     * its activity matches the queried one (a delegation with no activity
+     * applies in any context). When more than one delegation leaves a hop, the
+     * first in record order is followed.
+     *
+     * @return list<\Prov\Identifier\QualifiedName>
+     */
+    private function delegationChain(QualifiedName $agent, string $activityUri): array
+    {
+        $chain = [];
+        $seen = [$agent->getUri() => true];
+        $current = $agent;
+        while (true) {
+            $next = null;
+            foreach ($this->relationsFrom($current) as $relation) {
+                if (
+                    !$relation instanceof Delegation
+                    || $relation->responsible === null
+                    || $relation->delegate?->getUri() !== $current->getUri()
+                ) {
+                    continue;
+                }
+                if ($relation->activity !== null && $relation->activity->getUri() !== $activityUri) {
+                    continue;
+                }
+                $next = $relation->responsible;
+                break;
+            }
+            if ($next === null || isset($seen[$next->getUri()])) {
+                break;
+            }
+            $seen[$next->getUri()] = true;
+            $chain[] = $next;
+            $current = $next;
+        }
+        return $chain;
     }
 
     /**

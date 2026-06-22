@@ -112,9 +112,12 @@ $graph->relationsReferencing('ex:plan');   // any endpoint, including secondary 
 $graph->generationsOf('ex:article');       // Generation records of an entity
 $graph->usagesOf('ex:draft');              // Usage records of an entity
 $graph->recordByIdentifier('ex:article');  // O(1) record lookup
+$graph->agentsOf('ex:writing');            // agents associated with an activity
 
 ProvGraph::referencedIdentifiers($relation);  // every endpoint of one relation
 ```
+
+`agentsOf()` returns one `AgentInvolvement` per association, each carrying the agent, the plan the association named, the association's attributes (so `prov:role` survives), and `onBehalfOf`: the chain of agents this one acted on behalf of, walked from the `actedOnBehalfOf` delegations (nearest responsible first, activity-scoped delegations honored, cycles guarded). It reports identifiers and structure only; read an agent's `prov:type` with `recordByIdentifier()` to classify it.
 
 The graph covers the container's own records; flatten a document first to query across bundle boundaries. For type-centric queries (`all Usage records`), `Document::getRecordsByType()` remains the right tool.
 

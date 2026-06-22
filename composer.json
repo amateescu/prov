@@ -47,7 +47,7 @@
         "ext-dom": "*",
         "infection/infection": "^0.32.6",
         "openprov/testcases": "1.0.0",
-        "phpunit/phpunit": "^12.0"
+        "phpunit/phpunit": "^13.0"
     },
     "autoload": {
         "psr-4": {
