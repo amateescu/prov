@@ -119,6 +119,21 @@ final class JsonLdSerializerTest extends TestCase
         $this->assertSame('Document', $node['prov:type']['@value']);
     }
 
+    public function testAnonymousEntityGetsBlankIdInsteadOfVanishing(): void
+    {
+        // An identifier-less entity cannot be referenced by any relation (a
+        // formal endpoint needs a QualifiedName to point at), but its own
+        // attributes must still reach the output; JSON-LD represents an
+        // anonymous node fine.
+        $builder = $this->buildDoc();
+        $builder->entity(null, ['prov:label' => 'orphan']);
+        $data = $this->serializeToArray($builder);
+
+        $this->assertSame('prov:Entity', $data['@type']);
+        $this->assertSame('_:b1', $data['@id']);
+        $this->assertSame('orphan', $data['prov:label']);
+    }
+
     // Unqualified relation tests (no identifier, no extra attrs, no time)
 
     public function testUnqualifiedGeneration(): void

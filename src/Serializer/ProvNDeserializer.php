@@ -43,6 +43,20 @@ use Prov\Relation\Usage;
  */
 class ProvNDeserializer implements ProvDeserializerInterface
 {
+    /**
+     * For each relation keyword whose grammar has a formal `time` slot, the
+     * zero-based index of that slot in the args list (mirrors the `time`
+     * entries in `RelationMetadata::FORMALS`). A keyword not listed here has
+     * no time slot, so its arguments are never held to the dateTime shape.
+     */
+    private const array TIME_ARG_INDEX = [
+        'wasGeneratedBy' => 2,
+        'used' => 2,
+        'wasInvalidatedBy' => 2,
+        'wasStartedBy' => 3,
+        'wasEndedBy' => 3,
+    ];
+
     private string $input;
     private int $pos;
     private int $len;
@@ -334,7 +348,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
     {
         $this->expect('(');
 
-        $parsed = $this->parseRelationArgs($nsManager);
+        $parsed = $this->parseRelationArgs($nsManager, $kw);
 
         $this->expect(')');
 
@@ -350,14 +364,24 @@ class ProvNDeserializer implements ProvDeserializerInterface
     }
 
     /**
+     * @param string $kw
+     *   The relation keyword being parsed (e.g. 'wasGeneratedBy'). Selects the
+     *   time-slot index from TIME_ARG_INDEX, so a dateTime is only expected in
+     *   the argument position where the grammar has a time slot.
+     *
      * @return array{0: ?string, 1: list<string|null|\DateTimeImmutable>, 2: ?\Prov\Attribute\Attributes}
      */
-    private function parseRelationArgs(NamespaceManager $nsManager): array
+    private function parseRelationArgs(NamespaceManager $nsManager, string $kw): array
     {
         $id = null;
         $args = [];
         $attrs = null;
+        $timeIndex = self::TIME_ARG_INDEX[$kw] ?? null;
 
+        // No relation in TIME_ARG_INDEX has its time slot at index 0, so this
+        // first read never lands on a time slot, whether it becomes $id (via
+        // the optional "id;" prefix) or $args[0]. Reading it without the
+        // time-shape check is safe.
         $first = $this->readArgValue();
         $this->skip();
 
@@ -394,7 +418,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
                 break;
             }
             $before = $this->pos;
-            $args[] = $this->readArgValue();
+            $args[] = $this->readArgValue(count($args) === $timeIndex);
             $this->skip();
             // Progress guard: malformed inputs (e.g. "used(") can reach this branch
             // without advancing $this->pos; bail rather than spin.
@@ -406,7 +430,8 @@ class ProvNDeserializer implements ProvDeserializerInterface
         return [$id, $args, $attrs];
     }
 
-    private function readArgValue(): string|\DateTimeImmutable|null
+    // @mago-expect lint:no-boolean-flag-parameter
+    private function readArgValue(bool $expectTime = false): string|\DateTimeImmutable|null
     {
         $this->skip();
         if ($this->pos >= $this->len) {
@@ -422,13 +447,19 @@ class ProvNDeserializer implements ProvDeserializerInterface
 
         if ($ch >= '0' && $ch <= '9') {
             $val = $this->readUntilDelim();
-            if (strlen($val) >= 5 && $val[4] === '-' && preg_match('/^\d{4}-\d{2}-\d{2}/', $val) === 1) {
-                if (preg_match('/^\d{4}-\d{2}-\d{2}T/', $val) !== 1) {
-                    throw $this->err(
-                        "Expected an xsd:dateTime value with a time component (e.g. 2024-01-01T00:00:00) but found '{$val}'.",
-                    );
-                }
+            $isDatePrefixed = strlen($val) >= 5 && $val[4] === '-' && preg_match('/^\d{4}-\d{2}-\d{2}/', $val) === 1;
+            if ($isDatePrefixed && preg_match('/^\d{4}-\d{2}-\d{2}T/', $val) === 1) {
                 return $this->parseDateTime($val);
+            }
+            // A date-prefixed token that is not a full dateTime is invalid in
+            // a formal time slot (the caller says so via $expectTime), but a
+            // default-namespace identifier like '2024-01-15-report' is legal
+            // PN_LOCAL and just happens to share the shape; only the grammar
+            // position, not the token shape, can tell the two apart.
+            if ($isDatePrefixed && $expectTime) {
+                throw $this->err(
+                    "Expected an xsd:dateTime value with a time component (e.g. 2024-01-01T00:00:00) but found '{$val}'.",
+                );
             }
             return $val;
         }
@@ -442,8 +473,14 @@ class ProvNDeserializer implements ProvDeserializerInterface
      */
     private function parseDateTime(string $val): \DateTimeImmutable
     {
+        // An offset-less value (no explicit zone in $val) would otherwise parse
+        // in the server's default timezone, making the document content depend
+        // on server configuration. UTC is a fixed default that keeps it
+        // deterministic. A value with its own offset or "Z" is unaffected; the
+        // constructor uses that offset. The zone is built once and reused.
         try {
-            return new \DateTimeImmutable($val);
+            static $utc = new \DateTimeZone('UTC');
+            return new \DateTimeImmutable($val, $utc);
         } catch (\Exception) {
             throw $this->err("Invalid xsd:dateTime value '{$val}'.");
         }

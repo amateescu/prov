@@ -8,6 +8,7 @@ use Prov\Activity;
 use Prov\Agent;
 use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
+use Prov\Attribute\ValueIdentity;
 use Prov\Bundle;
 use Prov\Document;
 use Prov\Entity;
@@ -53,6 +54,11 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     private const string XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
     private const string XSD_NS = 'http://www.w3.org/2001/XMLSchema';
 
+    private ?PrefixMinter $minter = null;
+
+    /** URI of the document-level default namespace, or null if none is declared. */
+    private ?string $documentDefaultUri = null;
+
     // PROV-XML element names match PROV-JSON keys, and the child element
     // layout per relation comes from RelationMetadata::xmlChildElements().
 
@@ -60,11 +66,6 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         public readonly bool $prettyPrint = true,
         public readonly bool $sortRecords = false,
     ) {}
-
-    private ?PrefixMinter $minter = null;
-
-    /** URI of the document-level default namespace, or null if none is declared. */
-    private ?string $documentDefaultUri = null;
 
     // ============================================================
     // Serialization
@@ -926,8 +927,14 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
      */
     private function parseDateTime(string $value): \DateTimeImmutable
     {
+        // An offset-less value would otherwise parse in the server's default
+        // timezone, making the document content depend on server configuration.
+        // UTC is a fixed default that keeps it deterministic. A value with its
+        // own offset or "Z" is unaffected; the constructor uses that offset.
+        // The zone is built once and reused across parses.
         try {
-            return new \DateTimeImmutable($value);
+            static $utc = new \DateTimeZone('UTC');
+            return new \DateTimeImmutable($value, $utc);
         } catch (\DateException $e) {
             throw new DeserializationException("Invalid PROV-XML: malformed dateTime '{$value}'.", previous: $e);
         }
@@ -1063,9 +1070,18 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         }
 
         if ($xsiType !== '') {
-            if ($xsiType === 'xsd:QName') {
-                // QName values must be resolved in the element's namespace context,
-                // which may have local xmlns overrides.
+            // A QName value must be resolved in the element's namespace context,
+            // which may have local xmlns overrides. Only a type whose local part
+            // is "QName" can be one: the standard `xsd:QName` is matched by its
+            // literal token, and a non-standard prefix bound to the XSD namespace
+            // (xs:QName) is confirmed by the resolved URI. Every other type skips
+            // both checks and the URI comparison.
+            if (
+                $xsiType === 'xsd:QName'
+                || str_ends_with($xsiType, ':QName')
+                && ValueIdentity::normalizeDatatypeUri($nsManager->resolve($xsiType)->getUri())
+                    === ValueIdentity::XSD_QNAME_URI
+            ) {
                 $localNs = $nsManager;
                 $defaultUri = $el->lookupNamespaceURI(null);
                 if ($defaultUri !== null) {

@@ -12,6 +12,7 @@ use Prov\Entity;
 use Prov\Exception\DeserializationException;
 use Prov\Exception\ProvException;
 use Prov\Identifier\ProvNamespace;
+use Prov\Identifier\QualifiedName;
 use Prov\Relation\Alternate;
 use Prov\Relation\Association;
 use Prov\Relation\Attribution;
@@ -222,6 +223,37 @@ final class JsonSerializerTest extends TestCase
         $activities = $doc->activities;
         $this->assertCount(1, $activities);
         $this->assertSame('2023-01-15T00:00:00+00:00', $activities[0]->startTime->format(\DateTimeInterface::ATOM));
+    }
+
+    public function testDeserializeOffsetLessDateTimeIsTimezoneIndependent(): void
+    {
+        $json = '{"prefix":{"ex":"http://example.org/"},"activity":{"ex:a1":{"prov:startTime":"2011-11-16T16:05:00"}}}';
+        $original = date_default_timezone_get();
+        date_default_timezone_set('Pacific/Auckland');
+        try {
+            $doc = $this->serializer->deserialize($json);
+        } finally {
+            date_default_timezone_set($original);
+        }
+
+        $this->assertSame(
+            '2011-11-16T16:05:00+00:00',
+            $doc->activities[0]->startTime->format(\DateTimeInterface::ATOM),
+        );
+    }
+
+    public function testDeserializeQNameAttributeWithNonStandardXsdPrefix(): void
+    {
+        // The document binds "xs", not "xsd", to the XSD namespace; the QName
+        // type must still be detected by the resolved datatype URI.
+        $json =
+            '{"prefix":{"ex":"http://example.org/","xs":"http://www.w3.org/2001/XMLSchema#"},'
+            . '"entity":{"ex:e1":{"ex:ref":{"$":"ex:e2","type":"xs:QName"}}}}';
+        $doc = $this->serializer->deserialize($json);
+
+        $value = $doc->entities[0]->attributes->all()['http://example.org/ref'][0];
+        $this->assertInstanceOf(QualifiedName::class, $value);
+        $this->assertSame('http://example.org/e2', $value->getUri());
     }
 
     public function testDeserializeRelations(): void

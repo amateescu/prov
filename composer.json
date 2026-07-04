@@ -43,7 +43,7 @@
         "ext-dom": "Required for XmlSerializer (PROV-XML serialization and deserialization)"
     },
     "require-dev": {
-        "carthage-software/mago": "^1.30.0",
+        "carthage-software/mago": "^1.42.0",
         "ext-dom": "*",
         "infection/infection": "^0.32.6",
         "openprov/testcases": "1.0.0",

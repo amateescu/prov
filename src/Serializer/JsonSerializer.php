@@ -8,6 +8,7 @@ use Prov\Activity;
 use Prov\Agent;
 use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
+use Prov\Attribute\ValueIdentity;
 use Prov\Bundle;
 use Prov\Document;
 use Prov\Entity;
@@ -47,25 +48,13 @@ use Prov\Relation\Usage;
  * @mago-ignore analysis:mixed-argument
  * @mago-ignore analysis:mixed-assignment
  * @mago-ignore analysis:mixed-array-assignment
- * @mago-ignore analysis:invalid-iterator
  * @mago-ignore analysis:less-specific-argument
  * @mago-ignore analysis:less-specific-nested-argument-type
  * @mago-ignore analysis:imprecise-type
  */
 class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterface
 {
-    /** @var \WeakMap<\Prov\Model\ProvRecord, string> */
-    private \WeakMap $blankNodes;
-
-    private int $blankNodeCounter = 0;
-
-    /** @var array<string, true> Blank labels the document already uses. */
-    private array $usedBlankLabels = [];
-
-    /** Set once the used-blank-label scan has run for the current document. */
-    private bool $blankLabelsCollected = false;
-
-    private ?Document $currentDocument = null;
+    private BlankLabelMinter $blankLabelMinter;
 
     private ?PrefixMinter $minter = null;
 
@@ -73,7 +62,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         public readonly bool $prettyPrint = false,
         public readonly bool $sortRecords = false,
     ) {
-        $this->blankNodes = new \WeakMap();
+        $this->blankLabelMinter = new BlankLabelMinter(new Document([], [], []));
     }
 
     /**
@@ -85,13 +74,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     #[\NoDiscard]
     public function serialize(Document $document): string
     {
-        $this->blankNodes = new \WeakMap();
-        $this->blankNodeCounter = 0;
-        // The used-label scan is a full extra pass; defer it until a blank id is
-        // actually minted, which never happens for a fully-identified document.
-        $this->currentDocument = $document;
-        $this->blankLabelsCollected = false;
-        $this->usedBlankLabels = [];
+        $this->blankLabelMinter = new BlankLabelMinter($document);
 
         $nsManager = new NamespaceManager();
         foreach ($document->namespaces as $ns) {
@@ -162,71 +145,6 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     }
 
     /**
-     * Mints a serialization-only blank id, skipping every label the document
-     * itself uses: a collision would alias the minted record with an existing
-     * blank node and fabricate an identity link on deserialization.
-     */
-    private function mintBlankLabel(): string
-    {
-        if (!$this->blankLabelsCollected) {
-            assert($this->currentDocument !== null);
-            $this->collectUsedBlankLabels($this->currentDocument);
-            $this->blankLabelsCollected = true;
-        }
-        do {
-            $label = '_:b' . ++$this->blankNodeCounter;
-        } while (isset($this->usedBlankLabels[$label]));
-        return $label;
-    }
-
-    private function collectUsedBlankLabels(Document $document): void
-    {
-        $labels = [];
-        $records = $document->records;
-        foreach ($document->bundles as $bundle) {
-            $records = array_merge($records, $bundle->records);
-        }
-        foreach ($records as $record) {
-            $id = $record->identifier;
-            if ($id !== null && str_starts_with($id->uri, '_:')) {
-                $labels[$id->uri] = true;
-            }
-            if ($record instanceof ProvRelation) {
-                foreach (RelationMetadata::extractFormals($record) as $value) {
-                    if ($value instanceof QualifiedName) {
-                        if (str_starts_with($value->uri, '_:')) {
-                            $labels[$value->uri] = true;
-                        }
-                    } elseif (is_array($value)) {
-                        $this->collectBlankDictionaryLabels($value, $labels);
-                    }
-                }
-            }
-            foreach ($record->attributes->all() as $values) {
-                foreach ($values as $value) {
-                    if ($value instanceof QualifiedName && str_starts_with($value->uri, '_:')) {
-                        $labels[$value->getUri()] = true;
-                    }
-                }
-            }
-        }
-        $this->usedBlankLabels = $labels;
-    }
-
-    /**
-     * @param array<array-key, mixed> $items
-     * @param array<string, true> $labels
-     */
-    private function collectBlankDictionaryLabels(array $items, array &$labels): void
-    {
-        foreach ($items as $item) {
-            if ($item instanceof DictionaryEntry && $item->entity !== null && $item->entity->isBlank()) {
-                $labels[$item->entity->getUri()] = true;
-            }
-        }
-    }
-
-    /**
      * {@inheritdoc}
      */
     public function deserialize(string $data): Document
@@ -253,7 +171,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     private function deserializeDocument(array $json): Document
     {
         $nsManager = new NamespaceManager();
-        $prefixes = $json['prefix'] ?? [];
+        $prefixes = $this->assertSection($json['prefix'] ?? [], 'prefix');
         foreach ($prefixes as $prefix => $uri) {
             if (!is_string($uri)) {
                 throw new DeserializationException(
@@ -278,10 +196,14 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
         $bundles = [];
         if (isset($json['bundle'])) {
-            foreach ($json['bundle'] as $bundleId => $bundleData) {
+            foreach ($this->assertSection($json['bundle'], 'bundle') as $bundleId => $bundleData) {
+                $bundleData = $this->assertSection($bundleData, "bundle '{$bundleId}'");
                 $bundleNsManager = new NamespaceManager($nsManager);
                 if (isset($bundleData['prefix'])) {
-                    foreach ($bundleData['prefix'] as $prefix => $uri) {
+                    foreach ($this->assertSection(
+                        $bundleData['prefix'],
+                        "bundle '{$bundleId}' prefix",
+                    ) as $prefix => $uri) {
                         if (!is_string($uri)) {
                             throw new DeserializationException(
                                 "Invalid PROV-JSON: namespace URI for prefix '{$prefix}' must be a string.",
@@ -312,6 +234,24 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         }
 
         return new Document(records: $records, bundles: $bundles, namespaces: $nsManager->getRegisteredNamespaces());
+    }
+
+    /**
+     * Checks that a decoded PROV-JSON section is a map (a JSON object, or an
+     * empty array, since `json_decode(..., true)` cannot tell `{}` from `[]`).
+     * A scalar section would otherwise reach a typed-array parameter as a raw
+     * TypeError, or a `foreach` over it would warn and parse to nothing. This
+     * throws DeserializationException instead, the contract the PROV-N and
+     * PROV-XML deserializers already uphold for malformed input.
+     *
+     * @return array<array-key, mixed>
+     */
+    private function assertSection(mixed $section, string $name): array
+    {
+        if (!is_array($section)) {
+            throw new DeserializationException("Invalid PROV-JSON: the {$name} section must be a map.");
+        }
+        return $section;
     }
 
     /**
@@ -368,7 +308,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     ): void {
         $id = $record->identifier !== null
             ? $this->jsonQName($record->identifier)
-            : ($this->blankNodes[$record] ??= $this->mintBlankLabel());
+            : $this->blankLabelMinter->labelFor($record);
         $attrs = $record->attributes->isEmpty()
             ? new \stdClass()
             : ($this->serializeAttributes($record->attributes, $nsManager) ?: new \stdClass());
@@ -382,7 +322,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     {
         $id = $record->identifier !== null
             ? $this->jsonQName($record->identifier)
-            : ($this->blankNodes[$record] ??= $this->mintBlankLabel());
+            : $this->blankLabelMinter->labelFor($record);
         $attrs = $record->attributes->isEmpty() ? [] : $this->serializeAttributes($record->attributes, $nsManager);
 
         if ($record->startTime !== null) {
@@ -412,7 +352,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
         $id = $record->identifier !== null
             ? $this->jsonQName($record->identifier)
-            : ($this->blankNodes[$record] ??= $this->mintBlankLabel());
+            : $this->blankLabelMinter->labelFor($record);
         $this->appendToSection($output, $relationKey, $id, $attrs ?: new \stdClass());
     }
 
@@ -714,7 +654,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     {
         if (isset($json['entity'])) {
             $emptyAttrs = Attributes::empty();
-            foreach ($json['entity'] as $id => $attrs) {
+            foreach ($this->assertSection($json['entity'], 'entity') as $id => $attrs) {
                 $idStr = (string) $id;
                 $deserId = $this->resolveQName($idStr, $nsManager);
                 // Fast path: the overwhelmingly common "no attributes" case.
@@ -736,7 +676,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
         if (isset($json['activity'])) {
             $emptyAttrs = Attributes::empty();
-            foreach ($json['activity'] as $id => $attrs) {
+            foreach ($this->assertSection($json['activity'], 'activity') as $id => $attrs) {
                 $idStr = (string) $id;
                 $deserId = $this->resolveQName($idStr, $nsManager);
                 if ($attrs === [] || $attrs === null) {
@@ -766,7 +706,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
         if (isset($json['agent'])) {
             $emptyAttrs = Attributes::empty();
-            foreach ($json['agent'] as $id => $attrs) {
+            foreach ($this->assertSection($json['agent'], 'agent') as $id => $attrs) {
                 $idStr = (string) $id;
                 $deserId = $this->resolveQName($idStr, $nsManager);
                 if ($attrs === [] || $attrs === null) {
@@ -825,7 +765,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
             $formalAttrs = RelationMetadata::jsonFormalKeys($jsonKey);
 
-            foreach ($json[$jsonKey] as $id => $attrs) {
+            foreach ($this->assertSection($json[$jsonKey], $jsonKey) as $id => $attrs) {
                 // Scruffy provenance: an ID can map to an array of instances.
                 if (is_array($attrs) && array_is_list($attrs)) {
                     foreach ($attrs as $instance) {
@@ -1187,8 +1127,14 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         if (!is_string($value)) {
             throw new DeserializationException('Invalid PROV-JSON: expected a dateTime string.');
         }
+        // An offset-less value would otherwise parse in the server's default
+        // timezone, making the document content depend on server configuration.
+        // UTC is a fixed default that keeps it deterministic. A value with its
+        // own offset or "Z" is unaffected; the constructor uses that offset.
+        // The zone is built once and reused across parses.
         try {
-            return new \DateTimeImmutable($value);
+            static $utc = new \DateTimeZone('UTC');
+            return new \DateTimeImmutable($value, $utc);
         } catch (\DateException $e) {
             throw new DeserializationException("Invalid PROV-JSON: malformed dateTime '{$value}'.", previous: $e);
         }
@@ -1209,13 +1155,24 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             throw new DeserializationException('Invalid PROV-JSON: typed value "type" must be a string.');
         }
 
-        // prov:QUALIFIED_NAME is the PROV-JSON-native tag; xsd:QName is the equivalent
-        // from PROV-XML that some JSON fixtures emit. Both indicate a QualifiedName.
+        // prov:QUALIFIED_NAME is the PROV-JSON-native tag for a QualifiedName
+        // value; xsd:QName is the PROV-XML equivalent some JSON fixtures emit.
+        // These two standard spellings are matched by their literal token, so
+        // the common case skips resolving the type.
         if ($type === 'prov:QUALIFIED_NAME' || $type === 'xsd:QName') {
             return $this->resolveQName($lexical, $nsManager);
         }
 
+        // A document may bind a non-standard prefix to the XSD namespace (e.g.
+        // xs:QName); catch that by the resolved datatype URI, not the raw token.
         $datatype = $type !== null ? $this->resolveQName($type, $nsManager) : null;
+        if (
+            $datatype !== null
+            && ValueIdentity::normalizeDatatypeUri($datatype->getUri()) === ValueIdentity::XSD_QNAME_URI
+        ) {
+            return $this->resolveQName($lexical, $nsManager);
+        }
+
         $lang = $value['lang'] ?? null;
         if ($lang !== null && !is_string($lang)) {
             throw new DeserializationException('Invalid PROV-JSON: typed value "lang" must be a string.');

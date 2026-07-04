@@ -127,6 +127,45 @@ final class ProvNDeserializerTest extends TestCase
         $this->assertNull($a->endTime);
     }
 
+    public function testDateShapedIdentifierIsNotMisparsedAsDateTime(): void
+    {
+        // '2024-01-15-report' is legal PN_LOCAL and starts with a date
+        // prefix but is not a full xsd:dateTime; it must parse as an
+        // identifier in both an element position and a relation argument.
+        $doc = $this->parse(<<<'PROVN'
+            document
+            default <http://example.org/>
+            prefix ex <http://example.org/ns/>
+            entity(2024-01-15-report)
+            activity(ex:a1)
+            wasGeneratedBy(2024-01-15-report, ex:a1, -)
+            endDocument
+            PROVN);
+        $this->assertCount(1, $doc->entities);
+        $this->assertSame('http://example.org/2024-01-15-report', $doc->entities[0]->identifier->uri);
+        $gens = $doc->getRecordsByType(Generation::class);
+        $this->assertCount(1, $gens);
+        $this->assertSame('http://example.org/2024-01-15-report', $gens[0]->entity->uri);
+    }
+
+    public function testOffsetLessDateTimeIsTimezoneIndependent(): void
+    {
+        $original = date_default_timezone_get();
+        date_default_timezone_set('Pacific/Auckland');
+        try {
+            $doc = $this->parse(<<<'PROVN'
+                document
+                prefix ex <http://example.org/>
+                activity(ex:a1, 2011-11-16T16:05:00, -)
+                endDocument
+                PROVN);
+        } finally {
+            date_default_timezone_set($original);
+        }
+        $a = $doc->activities[0];
+        $this->assertSame('2011-11-16T16:05:00+00:00', $a->startTime->format(\DateTimeInterface::ATOM));
+    }
+
     public function testAgent(): void
     {
         $doc = $this->parse("document\nprefix ex <http://example.org/>\nagent(ex:ag1)\nendDocument");

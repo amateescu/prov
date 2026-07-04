@@ -11,6 +11,7 @@ use Prov\Attribute\Literal;
 use Prov\Builder\DocumentBuilder;
 use Prov\Exception\DeserializationException;
 use Prov\Identifier\ProvNamespace;
+use Prov\Identifier\QualifiedName;
 use Prov\Relation\Derivation;
 use Prov\Relation\Generation;
 use Prov\Serializer\JsonSerializer;
@@ -158,6 +159,35 @@ final class XmlSerializerTest extends TestCase
 
         $a = $doc->activities[0];
         $this->assertSame('2023-01-15T00:00:00+00:00', $a->startTime->format(\DateTimeInterface::ATOM));
+    }
+
+    public function testDeserializeOffsetLessDateTimeIsTimezoneIndependent(): void
+    {
+        $xml = '<?xml version="1.0"?><prov:document xmlns:prov="http://www.w3.org/ns/prov#" xmlns:ex="http://example.org/"><prov:activity prov:id="ex:a1"><prov:startTime>2011-11-16T16:05:00</prov:startTime></prov:activity></prov:document>';
+        $original = date_default_timezone_get();
+        date_default_timezone_set('Pacific/Auckland');
+        try {
+            $doc = $this->serializer->deserialize($xml);
+        } finally {
+            date_default_timezone_set($original);
+        }
+
+        $this->assertSame(
+            '2011-11-16T16:05:00+00:00',
+            $doc->activities[0]->startTime->format(\DateTimeInterface::ATOM),
+        );
+    }
+
+    public function testDeserializeQNameAttributeWithNonStandardXsdPrefix(): void
+    {
+        // The document binds "xs", not "xsd", to the XSD namespace; the QName
+        // type must still be detected by the resolved datatype URI.
+        $xml = '<?xml version="1.0"?><prov:document xmlns:prov="http://www.w3.org/ns/prov#" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xs="http://www.w3.org/2001/XMLSchema#" xmlns:ex="http://example.org/"><prov:entity prov:id="ex:e1"><ex:ref xsi:type="xs:QName">ex:e2</ex:ref></prov:entity></prov:document>';
+        $doc = $this->serializer->deserialize($xml);
+
+        $value = $doc->entities[0]->attributes->all()['http://example.org/ref'][0];
+        $this->assertInstanceOf(QualifiedName::class, $value);
+        $this->assertSame('http://example.org/e2', $value->getUri());
     }
 
     public function testDeserializeRelation(): void
