@@ -8,6 +8,8 @@ use Prov\Bundle;
 use Prov\Document;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\QualifiedName;
+use Prov\Model\ProvRelation;
+use Prov\Model\RelationMetadata;
 
 /**
  * Fluent builder for assembling a Document: add records (entities,
@@ -88,11 +90,52 @@ class DocumentBuilder extends RecordBuilder
     /**
      * Attaches an already-built Bundle to the document. Useful when a
      * Bundle is constructed outside the fluent flow (e.g. deserialized).
+     *
+     * The bundle mints its own `_:bN` labels outside this builder's blank()
+     * sequence, so advance the counter past the highest one it uses. Without
+     * that, a later blank() call could mint a label the bundle already uses,
+     * and flatten() would then merge two unrelated anonymous records when it
+     * lifts the bundle's records to document level without renaming.
      */
     public function addBundle(Bundle $bundle): static
     {
+        $this->advanceBlankNodeCounterPast($this->maxBlankNodeNumber($bundle->records));
         $this->bundles[] = $bundle;
         return $this;
+    }
+
+    /**
+     * Returns the highest numeric suffix among the `_:bN` labels these records
+     * use, whether through a record's own identifier or (for a relation) a
+     * formal endpoint or dictionary-entry entity. Zero if none use one.
+     *
+     * @param list<\Prov\Model\ProvRecord> $records
+     */
+    private function maxBlankNodeNumber(array $records): int
+    {
+        $max = 0;
+        foreach ($records as $record) {
+            $max = max($max, $this->blankNodeNumber($record->identifier));
+            if ($record instanceof ProvRelation) {
+                foreach (RelationMetadata::refEndpoints($record) as $endpoint) {
+                    $max = max($max, $this->blankNodeNumber($endpoint));
+                }
+            }
+        }
+        return $max;
+    }
+
+    /**
+     * The numeric suffix of a `_:bN` blank-node identifier, or 0 for anything
+     * else (a named identifier, null, or a non-numeric blank label).
+     */
+    private function blankNodeNumber(?QualifiedName $id): int
+    {
+        if ($id === null || !str_starts_with($id->uri, '_:b')) {
+            return 0;
+        }
+        $suffix = substr($id->uri, strlen('_:b'));
+        return ctype_digit($suffix) ? (int) $suffix : 0;
     }
 
     /**

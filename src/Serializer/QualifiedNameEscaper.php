@@ -36,19 +36,33 @@ final class QualifiedNameEscaper
      * punctuation is escaped at every position; `.` and `-` only where
      * PN_LOCAL cannot carry them bare (`.` first or last, `-` first), so the
      * common dotted-name shape keeps its familiar lexical form.
+     *
+     * A literal backslash is rejected: PN_CHARS_ESC has no escape for backslash
+     * itself, so decode() cannot tell an escaped punctuation mark from a raw
+     * backslash left untouched, and a name carrying one would alias a different
+     * name on round trip. The check rides the same scan that does the escaping,
+     * so a clean name still returns on the fast path at no extra cost.
+     *
+     * @throws \InvalidArgumentException
+     *   When the local name contains a backslash.
      */
     public static function escape(string $local): string
     {
         // Fast path: when the name carries none of the punctuation that could
-        // ever need escaping, a single C-level scan returns it untouched and
-        // skips the per-character loop. This is the common shape (e.g. `e123`).
-        if (strpbrk($local, self::ESCAPE_ALWAYS . '.-') === false) {
+        // ever need escaping (and no backslash), a single C-level scan returns
+        // it untouched and skips the per-character loop. Common shape (`e123`).
+        if (strpbrk($local, self::ESCAPE_ALWAYS . '.-\\') === false) {
             return $local;
         }
         $out = '';
         $len = strlen($local);
         for ($i = 0; $i < $len; $i++) {
             $c = $local[$i];
+            if ($c === '\\') {
+                throw new \InvalidArgumentException(
+                    "Local name '{$local}' contains a backslash, which cannot be represented in the PROV grammar.",
+                );
+            }
             $escape =
                 str_contains(self::ESCAPE_ALWAYS, $c)
                 || $c === '.' && ($i === 0 || $i === ($len - 1))

@@ -483,6 +483,22 @@ final class DocumentBuilderTest extends TestCase
         $this->assertSame('http://example.org/b1', $doc->bundles[0]->identifier->uri);
     }
 
+    public function testAddBundleAdvancesBlankNodeCounterPastBundleLabels(): void
+    {
+        // A standalone BundleBuilder mints from its own independent sequence,
+        // the way a deserialized bundle's blank labels never went through
+        // this document builder's blank() calls either.
+        $bundleBuilder = new \Prov\Builder\BundleBuilder($this->ex->qualifiedName('b1'))->addNamespace($this->ex);
+        $bundleBlank = $bundleBuilder->blank();
+        $bundle = $bundleBuilder->entity($bundleBlank)->build();
+        $this->assertSame('_:b1', $bundleBlank->uri);
+
+        $this->builder->addBundle($bundle);
+        $nextBlank = $this->builder->blank();
+
+        $this->assertNotSame($bundleBlank->uri, $nextBlank->uri);
+    }
+
     public function testSetDefaultNamespace(): void
     {
         $builder = new DocumentBuilder();

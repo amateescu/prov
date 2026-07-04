@@ -203,6 +203,13 @@ final class ProvNSerializerTest extends TestCase
         $this->assertStringContainsString('    entity(ex:e1)', $output);
     }
 
+    public function testNegativeIndentationIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('non-negative');
+        new ProvNSerializer(indentation: -1);
+    }
+
     public function testFullDocumentStructure(): void
     {
         $builder = $this->buildDoc();
@@ -444,6 +451,31 @@ final class ProvNSerializerTest extends TestCase
         $output = $this->serializer->serialize($builder->build());
 
         $this->assertStringContainsString('"contains \\"quotes\\""', $output);
+    }
+
+    public function testBackslashInLocalNameIsRejected(): void
+    {
+        // PN_CHARS_ESC has no escape for a backslash itself, so a local name
+        // carrying one is unrepresentable; letting it through would silently
+        // alias whatever name its own escape() output happens to match.
+        $builder = $this->buildDoc();
+        $builder->entity('ex:bad\\name');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('backslash');
+        $output = $this->serializer->serialize($builder->build());
+        $this->assertIsString($output); // Unreachable: serialize() throws above.
+    }
+
+    public function testBackslashInAttributeKeyIsRejected(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1', ['ex:bad\\key' => 'value']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('backslash');
+        $output = $this->serializer->serialize($builder->build());
+        $this->assertIsString($output); // Unreachable: serialize() throws above.
     }
 
     public function testIntAttributeTypedByRange(): void

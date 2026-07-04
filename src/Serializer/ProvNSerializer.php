@@ -30,17 +30,33 @@ use Prov\Relation\Specialization;
  */
 class ProvNSerializer implements ProvSerializerInterface
 {
+    /**
+     * PROV-N productions without an optional identifier slot; an identifier
+     * on such a record is dropped, matching the grammar.
+     *
+     * @var array<class-string<\Prov\Model\ProvRelation>, true>
+     */
+    private const array RELATIONS_WITHOUT_ID = [
+        Specialization::class => true,
+        Alternate::class => true,
+        Membership::class => true,
+        Mention::class => true,
+    ];
+
     private readonly string $indentPrefix;
+
+    private ?PrefixMinter $minter = null;
 
     public function __construct(
         public readonly int $indentation = 2,
         public readonly bool $includeDefaultNamespace = true,
         public readonly bool $sortRecords = false,
     ) {
+        if ($this->indentation < 0) {
+            throw new \InvalidArgumentException('Indentation must be a non-negative number of spaces.');
+        }
         $this->indentPrefix = str_repeat(' ', $this->indentation);
     }
-
-    private ?PrefixMinter $minter = null;
 
     /**
      * {@inheritdoc}
@@ -191,19 +207,6 @@ class ProvNSerializer implements ProvSerializerInterface
         }
         return "agent({$id}" . $this->formatAttributes($agent->attributes, $nsManager) . ')';
     }
-
-    /**
-     * PROV-N productions without an optional identifier slot; an identifier
-     * on such a record is dropped, matching the grammar.
-     *
-     * @var array<class-string<\Prov\Model\ProvRelation>, true>
-     */
-    private const array RELATIONS_WITHOUT_ID = [
-        Specialization::class => true,
-        Alternate::class => true,
-        Membership::class => true,
-        Mention::class => true,
-    ];
 
     /**
      * Serializes any standard relation from its RelationMetadata definition:
@@ -393,6 +396,8 @@ class ProvNSerializer implements ProvSerializerInterface
      */
     private function escapeLocalPart(string $local): string
     {
+        // QualifiedNameEscaper::escape() rejects a literal backslash (PN_CHARS_ESC
+        // has no escape for it, so it would alias a different name on round trip).
         $escaped = QualifiedNameEscaper::escape($local);
         if ($this->hasUnsafeChars($escaped)) {
             throw new \InvalidArgumentException(

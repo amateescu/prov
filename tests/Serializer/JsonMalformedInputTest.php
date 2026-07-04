@@ -45,6 +45,14 @@ final class JsonMalformedInputTest extends TestCase
             'bundle prefix uri not string' => [
                 '{"bundle":{"ex:b1":{"prefix":{"bx":false}}}}',
             ],
+            'prefix section is a scalar' => ['{"prefix": "notamap"}'],
+            'entity section is a scalar' => ['{"entity": "notamap"}'],
+            'activity section is a scalar' => ['{"activity": "notamap"}'],
+            'agent section is a scalar' => ['{"agent": "notamap"}'],
+            'relation section is a scalar' => ['{"wasGeneratedBy": "notamap"}'],
+            'bundle section is a scalar' => ['{"bundle": "notamap"}'],
+            'bundle body is a scalar' => ['{"bundle": {"ex:b": "notamap"}}'],
+            'bundle prefix section is a scalar' => ['{"bundle": {"ex:b": {"prefix": "notamap"}}}'],
         ];
     }
 

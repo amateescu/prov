@@ -127,6 +127,22 @@ abstract class RecordBuilder
         $this->blankNodeScope = $scope;
     }
 
+    /**
+     * Advances the blank-node counter so the next mint is past `$n`, never
+     * moving it backward. Used when records minted outside this builder's own
+     * blank() calls are attached directly (an externally built Bundle). Two
+     * labels both minted by blank() never collide; this keeps an attached
+     * label from colliding with a later mint too.
+     */
+    protected function advanceBlankNodeCounterPast(int $n): void
+    {
+        if ($this->blankNodeScope !== null) {
+            $this->blankNodeScope->advanceBlankNodeCounterPast($n);
+            return;
+        }
+        $this->blankNodeCounter = max($this->blankNodeCounter, $n);
+    }
+
     protected function markBuilt(): void
     {
         if ($this->built) {

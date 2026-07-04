@@ -23,6 +23,7 @@ final class ValueIdentity
 {
     public const string XSD_STRING_URI = 'http://www.w3.org/2001/XMLSchema#string';
     public const string XML_LITERAL_URI = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral';
+    public const string XSD_QNAME_URI = 'http://www.w3.org/2001/XMLSchema#QName';
 
     /**
      * @param ?array<string, string> $blankLabels
@@ -74,7 +75,12 @@ final class ValueIdentity
             return 'lit:' . ($value ? 'true' : 'false') . '^^http://www.w3.org/2001/XMLSchema#boolean';
         }
         if (is_int($value)) {
-            return 'lit:' . $value . '^^http://www.w3.org/2001/XMLSchema#int';
+            // ProvNSerializer and XmlSerializer type a bare int outside the
+            // 32-bit xsd:int range as xsd:long. Match that here. Signing every
+            // int as xsd:int would make such a value compare unequal to its
+            // own round trip and to the equal Literal::long() value.
+            $datatype = $value < Literal::XSD_INT_MIN || $value > Literal::XSD_INT_MAX ? 'long' : 'int';
+            return 'lit:' . $value . '^^http://www.w3.org/2001/XMLSchema#' . $datatype;
         }
         return 'lit:' . Literal::formatFloat($value) . '^^http://www.w3.org/2001/XMLSchema#float';
     }

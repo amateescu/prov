@@ -369,6 +369,19 @@ final class AttributesTest extends TestCase
         $this->assertSame([42], $attrs->get($key));
     }
 
+    public function testDedupeTreatsBareOutOfRangeIntAndXsdLongLiteralAsEqual(): void
+    {
+        $key = $this->prov->qualifiedName('value');
+        $uri = $key->getUri();
+
+        // Outside the 32-bit xsd:int range, a bare int round-trips through
+        // PROV-N/XML as xsd:long, not xsd:int; its signature must match.
+        $attrs = new Attributes([$uri => [5_000_000_000, Literal::long(5_000_000_000)]], [$uri => $key]);
+
+        $this->assertCount(1, $attrs);
+        $this->assertSame([5_000_000_000], $attrs->get($key));
+    }
+
     public function testDedupeKeepsValuesThatDifferOnlyByDatatype(): void
     {
         $key = $this->prov->qualifiedName('value');

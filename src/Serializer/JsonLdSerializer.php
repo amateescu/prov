@@ -24,12 +24,16 @@ use Prov\Relation\Mention;
  */
 class JsonLdSerializer implements ProvSerializerInterface
 {
+    private BlankLabelMinter $blankLabelMinter;
+
+    private ?PrefixMinter $minter = null;
+
     public function __construct(
         public readonly bool $prettyPrint = false,
         public readonly bool $sortRecords = false,
-    ) {}
-
-    private ?PrefixMinter $minter = null;
+    ) {
+        $this->blankLabelMinter = new BlankLabelMinter(new Document([], [], []));
+    }
 
     /**
      * {@inheritdoc}
@@ -37,6 +41,8 @@ class JsonLdSerializer implements ProvSerializerInterface
     #[\NoDiscard]
     public function serialize(Document $document): string
     {
+        $this->blankLabelMinter = new BlankLabelMinter($document);
+
         $nsManager = new NamespaceManager();
         foreach ($document->namespaces as $ns) {
             if ($ns->prefix === 'default') {
@@ -135,10 +141,16 @@ class JsonLdSerializer implements ProvSerializerInterface
         /** @var array<string, array<string, mixed>> $nodes */
         $nodes = [];
 
-        // First pass: create nodes for all elements.
+        // First pass: create nodes for all elements. An identifier-less
+        // element has no QualifiedName, so no relation can point at it, but
+        // skipping it here would drop its own attributes from the output.
+        // JSON-LD represents an anonymous node fine, so mint it a blank id,
+        // the same way JsonSerializer does.
         foreach ($records as $record) {
-            if ($record instanceof ProvElement && $record->identifier !== null) {
-                $id = $this->jsonLdId($record->identifier);
+            if ($record instanceof ProvElement) {
+                $id = $record->identifier !== null
+                    ? $this->jsonLdId($record->identifier)
+                    : $this->blankLabelMinter->labelFor($record);
                 if (!isset($nodes[$id])) {
                     $nodes[$id] = ['@id' => $id];
                 }
@@ -223,7 +235,7 @@ class JsonLdSerializer implements ProvSerializerInterface
         }
 
         $hasExtraFormals = false;
-        foreach ($properties as $prop => $unused) {
+        foreach (array_keys($properties) as $prop) {
             if ($prop !== $objectProp && ($formals[$prop] ?? null) !== null) {
                 $hasExtraFormals = true;
                 break;
