@@ -64,14 +64,7 @@ class ProvNSerializer implements ProvSerializerInterface
     #[\NoDiscard]
     public function serialize(Document $document): string
     {
-        $nsManager = new NamespaceManager();
-        foreach ($document->namespaces as $ns) {
-            if ($ns->prefix === 'default') {
-                $nsManager->setDefault($ns);
-            } else {
-                $nsManager->addOrReplace($ns);
-            }
-        }
+        $nsManager = NamespaceManager::forContainer($document->namespaces);
         $minter = new PrefixMinter($nsManager);
         $this->minter = $minter;
 
@@ -121,14 +114,7 @@ class ProvNSerializer implements ProvSerializerInterface
     /** @param list<string> $lines */
     private function serializeBundle(Bundle $bundle, array &$lines, NamespaceManager $parentNsManager): void
     {
-        $nsManager = new NamespaceManager($parentNsManager);
-        foreach ($bundle->namespaces as $ns) {
-            if ($ns->prefix === 'default') {
-                $nsManager->setDefault($ns);
-            } else {
-                $nsManager->addOrReplace($ns);
-            }
-        }
+        $nsManager = NamespaceManager::forContainer($bundle->namespaces, $parentNsManager);
 
         $indent = $this->indentPrefix;
         $indent2 = $indent . $indent;
@@ -436,12 +422,7 @@ class ProvNSerializer implements ProvSerializerInterface
             $key = $this->minter !== null
                 ? $this->minter->uriToPrefixed($uri, $nsManager)
                 : $nsManager->uriToPrefixed($uri);
-            // A default-namespace key prefixes as the reserved "default:" sentinel,
-            // which must never be written; emit the bare local name instead, which
-            // resolves against the document's `default <uri>` declaration.
-            if (str_starts_with($key, 'default:')) {
-                $key = substr($key, strlen('default:'));
-            }
+            $key = NamespaceManager::stripDefaultSentinel($key);
             $key = $this->escapeAttributeKey($key);
             $this->assertSafeAttributeKey($key);
             foreach ($values as $value) {

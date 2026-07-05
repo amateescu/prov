@@ -14,6 +14,7 @@ use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
 use Prov\Relation\Derivation;
 use Prov\Relation\Generation;
+use Prov\Relation\Usage;
 use Prov\Serializer\JsonSerializer;
 use Prov\Serializer\XmlSerializer;
 
@@ -198,6 +199,19 @@ final class XmlSerializerTest extends TestCase
         $gens = $doc->getRecordsByType(Generation::class);
         $this->assertCount(1, $gens);
         $this->assertSame('http://example.org/e1', $gens[0]->entity->uri);
+    }
+
+    public function testDeserializeUsageWithoutEntity(): void
+    {
+        // PROV-DM marks usage's entity as optional; a record carrying only the
+        // mandatory activity is valid input.
+        $xml = '<?xml version="1.0"?><prov:document xmlns:prov="http://www.w3.org/ns/prov#" xmlns:ex="http://example.org/"><prov:used prov:id="ex:u1"><prov:activity prov:ref="ex:a1"/></prov:used></prov:document>';
+        $doc = $this->serializer->deserialize($xml);
+
+        $usages = $doc->getRecordsByType(Usage::class);
+        $this->assertCount(1, $usages);
+        $this->assertSame('http://example.org/a1', $usages[0]->activity->uri);
+        $this->assertNull($usages[0]->entity);
     }
 
     public function testDeserializeBundle(): void

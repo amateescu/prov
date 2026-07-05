@@ -16,9 +16,9 @@ use Prov\Model\ProvRelation;
 readonly class Alternate extends ProvRelation
 {
     public function __construct(
-        ?QualifiedName $identifier = null,
-        public ?QualifiedName $alternate1 = null,
-        public ?QualifiedName $alternate2 = null,
+        ?QualifiedName $identifier,
+        public QualifiedName $alternate1,
+        public QualifiedName $alternate2,
         Attributes $attributes = new Attributes(),
     ) {
         parent::__construct($identifier, $attributes);

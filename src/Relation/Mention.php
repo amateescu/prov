@@ -15,9 +15,9 @@ use Prov\Model\ProvRelation;
 readonly class Mention extends ProvRelation
 {
     public function __construct(
-        ?QualifiedName $identifier = null,
-        public ?QualifiedName $specificEntity = null,
-        public ?QualifiedName $generalEntity = null,
+        ?QualifiedName $identifier,
+        public QualifiedName $specificEntity,
+        public QualifiedName $generalEntity,
         public ?QualifiedName $bundle = null,
         Attributes $attributes = new Attributes(),
     ) {

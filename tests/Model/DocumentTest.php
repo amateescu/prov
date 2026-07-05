@@ -64,7 +64,7 @@ final class DocumentTest extends TestCase
 
     public function testGetRelations(): void
     {
-        $gen = new Generation(entity: $this->ex->qualifiedName('e1'));
+        $gen = new Generation(identifier: null, entity: $this->ex->qualifiedName('e1'));
         $attr = new Attribution(entity: $this->ex->qualifiedName('e1'), agent: $this->ex->qualifiedName('ag1'));
         $e1 = new Entity($this->ex->qualifiedName('e1'));
 
@@ -76,8 +76,8 @@ final class DocumentTest extends TestCase
 
     public function testGetRecordsByType(): void
     {
-        $gen1 = new Generation(entity: $this->ex->qualifiedName('e1'));
-        $gen2 = new Generation(entity: $this->ex->qualifiedName('e2'));
+        $gen1 = new Generation(identifier: null, entity: $this->ex->qualifiedName('e1'));
+        $gen2 = new Generation(identifier: null, entity: $this->ex->qualifiedName('e2'));
         $attr = new Attribution(entity: $this->ex->qualifiedName('e1'));
 
         $doc = new Document(records: [$gen1, $gen2, $attr], bundles: [], namespaces: []);

@@ -43,14 +43,7 @@ class JsonLdSerializer implements ProvSerializerInterface
     {
         $this->blankLabelMinter = new BlankLabelMinter($document);
 
-        $nsManager = new NamespaceManager();
-        foreach ($document->namespaces as $ns) {
-            if ($ns->prefix === 'default') {
-                $nsManager->setDefault($ns);
-            } else {
-                $nsManager->addOrReplace($ns);
-            }
-        }
+        $nsManager = NamespaceManager::forContainer($document->namespaces);
         $minter = new PrefixMinter($nsManager);
         $this->minter = $minter;
 
@@ -59,14 +52,7 @@ class JsonLdSerializer implements ProvSerializerInterface
         $graph = $this->buildGraph($documentRecords, $nsManager);
 
         foreach ($document->bundles as $bundle) {
-            $bundleNsManager = new NamespaceManager($nsManager);
-            foreach ($bundle->namespaces as $ns) {
-                if ($ns->prefix === 'default') {
-                    $bundleNsManager->setDefault($ns);
-                } else {
-                    $bundleNsManager->addOrReplace($ns);
-                }
-            }
+            $bundleNsManager = NamespaceManager::forContainer($bundle->namespaces, $nsManager);
 
             $bundleRecords = $this->sortRecords ? OutputOrder::records($bundle->records) : $bundle->records;
             $bundleNode = [
@@ -262,11 +248,8 @@ class JsonLdSerializer implements ProvSerializerInterface
     /** @param array<string, array<string, mixed>> $nodes */
     private function attachMention(Mention $men, array &$nodes): void
     {
-        $subjectId = $men->specificEntity !== null ? $this->jsonLdId($men->specificEntity) : null;
+        $subjectId = $this->jsonLdId($men->specificEntity);
         $general = $men->generalEntity;
-        if ($subjectId === null || $general === null) {
-            return;
-        }
         $this->ensureNode($nodes, $subjectId);
         $value = $this->idRef($general);
         if ($men->bundle !== null) {
@@ -306,11 +289,7 @@ class JsonLdSerializer implements ProvSerializerInterface
             $key = $this->minter !== null
                 ? $this->minter->uriToPrefixed($uri, $nsManager)
                 : $nsManager->uriToPrefixed($uri);
-            // The reserved `default:` prefix is never written; the bare local
-            // term expands against the context's `@vocab` (the default namespace).
-            if (str_starts_with($key, 'default:')) {
-                $key = substr($key, strlen('default:'));
-            }
+            $key = NamespaceManager::stripDefaultSentinel($key);
             foreach ($values as $value) {
                 $this->appendProperty($node, $key, $this->serializeValue($value));
             }

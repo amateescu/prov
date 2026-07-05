@@ -74,6 +74,15 @@ final class ProvNMalformedInputTest extends TestCase
             'typed literal without datatype' => [
                 'document prefix ex <http://example.org/> entity(ex:e1, [ex:a = "v" %%]) endDocument',
             ],
+            'wasGeneratedBy missing entity' => [
+                'document prefix ex <http://example.org/> wasGeneratedBy(-, ex:a1) endDocument',
+            ],
+            'specializationOf missing specificEntity' => [
+                'document prefix ex <http://example.org/> specializationOf(-, ex:e2) endDocument',
+            ],
+            'hadDictionaryMember missing dictionary' => [
+                'document prefix ex <http://example.org/> hadDictionaryMember(-, ex:e1, ex:k1) endDocument',
+            ],
         ];
     }
 

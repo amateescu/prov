@@ -510,23 +510,54 @@ class ProvNDeserializer implements ProvDeserializerInterface
         $t3 = isset($args[3]) && $args[3] instanceof \DateTimeImmutable ? $args[3] : null;
 
         $records[] = match ($kw) {
-            'wasGeneratedBy' => new Generation($idQn, $q0, $q1, $t2, $attrs),
+            'wasGeneratedBy' => new Generation($idQn, $this->requireRef($q0, 'entity', $kw), $q1, $t2, $attrs),
             'used' => new Usage($idQn, $q0, $q1, $t2, $attrs),
             'wasInformedBy' => new Communication($idQn, $q0, $q1, $attrs),
             'wasStartedBy' => new Start($idQn, $q0, $q1, $q2, $t3, $attrs),
             'wasEndedBy' => new End($idQn, $q0, $q1, $q2, $t3, $attrs),
-            'wasInvalidatedBy' => new Invalidation($idQn, $q0, $q1, $t2, $attrs),
+            'wasInvalidatedBy' => new Invalidation($idQn, $this->requireRef($q0, 'entity', $kw), $q1, $t2, $attrs),
             'wasDerivedFrom' => new Derivation($idQn, $q0, $q1, $q2, $q3, $q4, $attrs),
             'wasAttributedTo' => new Attribution($idQn, $q0, $q1, $attrs),
             'wasAssociatedWith' => new Association($idQn, $q0, $q1, $q2, $attrs),
             'actedOnBehalfOf' => new Delegation($idQn, $q0, $q1, $q2, $attrs),
             'wasInfluencedBy' => new Influence($idQn, $q0, $q1, $attrs),
-            'specializationOf' => new Specialization($idQn, $q0, $q1, $attrs),
-            'alternateOf' => new Alternate($idQn, $q0, $q1, $attrs),
+            'specializationOf' => new Specialization(
+                $idQn,
+                $this->requireRef($q0, 'specificEntity', $kw),
+                $this->requireRef($q1, 'generalEntity', $kw),
+                $attrs,
+            ),
+            'alternateOf' => new Alternate(
+                $idQn,
+                $this->requireRef($q0, 'alternate1', $kw),
+                $this->requireRef($q1, 'alternate2', $kw),
+                $attrs,
+            ),
             'hadMember' => new Membership($idQn, $q0, $q1, $attrs),
-            'mentionOf' => new Mention($idQn, $q0, $q1, $q2, $attrs),
+            'mentionOf' => new Mention(
+                $idQn,
+                $this->requireRef($q0, 'specificEntity', $kw),
+                $this->requireRef($q1, 'generalEntity', $kw),
+                $q2,
+                $attrs,
+            ),
             default => throw $this->err("Unknown relation: {$kw}"),
         };
+    }
+
+    /**
+     * Enforces a PROV-DM-mandatory relation endpoint. A malformed document
+     * omitting it (or writing `-`) is invalid input, not an internal error.
+     *
+     * @throws \Prov\Exception\DeserializationException
+     *   When `$value` is null.
+     */
+    private function requireRef(?QualifiedName $value, string $prop, string $kw): QualifiedName
+    {
+        if ($value === null) {
+            throw $this->err("{$kw}(...) is missing a required value for '{$prop}'.");
+        }
+        return $value;
     }
 
     // --- Dictionary relations ---
@@ -569,10 +600,11 @@ class ProvNDeserializer implements ProvDeserializerInterface
         $this->expect(',');
         $this->skip();
         $key = $this->readAttrValue($nsManager);
+        $dictionaryQn = $dictionary !== null ? $this->resolveQName($dictionary, $nsManager) : null;
 
         $records[] = new DictionaryMembership(
             null,
-            $dictionary !== null ? $this->resolveQName($dictionary, $nsManager) : null,
+            $this->requireRef($dictionaryQn, 'dictionary', 'hadDictionaryMember'),
             [new DictionaryEntry($key, $entity)],
             Attributes::empty(),
         );
@@ -619,10 +651,12 @@ class ProvNDeserializer implements ProvDeserializerInterface
             }
         }
 
+        $afterQn = $after !== null ? $this->resolveQName($after, $nsManager) : null;
+        $beforeQn = $before !== null ? $this->resolveQName($before, $nsManager) : null;
         $records[] = new DictionaryInsertion(
             $id !== null ? $this->resolveQName($id, $nsManager) : null,
-            $after !== null ? $this->resolveQName($after, $nsManager) : null,
-            $before !== null ? $this->resolveQName($before, $nsManager) : null,
+            $this->requireRef($afterQn, 'after', 'derivedByInsertionFrom'),
+            $this->requireRef($beforeQn, 'before', 'derivedByInsertionFrom'),
             $pairs,
             $attrs ?? Attributes::empty(),
         );
@@ -669,10 +703,12 @@ class ProvNDeserializer implements ProvDeserializerInterface
             }
         }
 
+        $afterQn = $after !== null ? $this->resolveQName($after, $nsManager) : null;
+        $beforeQn = $before !== null ? $this->resolveQName($before, $nsManager) : null;
         $records[] = new DictionaryRemoval(
             $id !== null ? $this->resolveQName($id, $nsManager) : null,
-            $after !== null ? $this->resolveQName($after, $nsManager) : null,
-            $before !== null ? $this->resolveQName($before, $nsManager) : null,
+            $this->requireRef($afterQn, 'after', 'derivedByRemovalFrom'),
+            $this->requireRef($beforeQn, 'before', 'derivedByRemovalFrom'),
             $keys,
             $attrs ?? Attributes::empty(),
         );

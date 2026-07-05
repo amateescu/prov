@@ -76,14 +76,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     {
         $this->blankLabelMinter = new BlankLabelMinter($document);
 
-        $nsManager = new NamespaceManager();
-        foreach ($document->namespaces as $ns) {
-            if ($ns->prefix === 'default') {
-                $nsManager->setDefault($ns);
-            } else {
-                $nsManager->addOrReplace($ns);
-            }
-        }
+        $nsManager = NamespaceManager::forContainer($document->namespaces);
         $minter = new PrefixMinter($nsManager);
         $this->minter = $minter;
 
@@ -95,14 +88,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
         foreach ($document->bundles as $bundle) {
             $bundleKey = $this->jsonQName($bundle->identifier);
-            $bundleNsManager = new NamespaceManager($nsManager);
-            foreach ($bundle->namespaces as $ns) {
-                if ($ns->prefix === 'default') {
-                    $bundleNsManager->setDefault($ns);
-                } else {
-                    $bundleNsManager->addOrReplace($ns);
-                }
-            }
+            $bundleNsManager = NamespaceManager::forContainer($bundle->namespaces, $nsManager);
             $bundleData = [];
             $bundlePrefixes = $this->serializePrefixes($bundle->namespaces, $document->namespaces);
             if ($bundlePrefixes !== []) {
@@ -536,11 +522,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $key = $this->minter !== null
                 ? $this->minter->uriToPrefixed($uri, $nsManager)
                 : $nsManager->uriToPrefixed($uri);
-            // The reserved "default:" sentinel never appears literally; the bare
-            // local name resolves against the `default` member of the prefix map.
-            if (str_starts_with($key, 'default:')) {
-                $key = substr($key, strlen('default:'));
-            }
+            $key = NamespaceManager::stripDefaultSentinel($key);
             $key = $this->escapeAttributeKey($key);
             $isMultiValue = count($values) > 1;
             foreach ($values as $value) {
@@ -841,7 +823,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         $record = match ($jsonKey) {
             'wasGeneratedBy' => new Generation(
                 $deserId,
-                $formal['prov:entity'] ?? null,
+                $this->requireRef($formal['prov:entity'] ?? null, 'entity', $jsonKey),
                 $formal['prov:activity'] ?? null,
                 $formal['prov:time'] ?? null,
                 $extra,
@@ -877,7 +859,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             ),
             'wasInvalidatedBy' => new Invalidation(
                 $deserId,
-                $formal['prov:entity'] ?? null,
+                $this->requireRef($formal['prov:entity'] ?? null, 'entity', $jsonKey),
                 $formal['prov:activity'] ?? null,
                 $formal['prov:time'] ?? null,
                 $extra,
@@ -919,14 +901,14 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             ),
             'specializationOf' => new Specialization(
                 $deserId,
-                $formal['prov:specificEntity'] ?? null,
-                $formal['prov:generalEntity'] ?? null,
+                $this->requireRef($formal['prov:specificEntity'] ?? null, 'specificEntity', $jsonKey),
+                $this->requireRef($formal['prov:generalEntity'] ?? null, 'generalEntity', $jsonKey),
                 $extra,
             ),
             'alternateOf' => new Alternate(
                 $deserId,
-                $formal['prov:alternate1'] ?? null,
-                $formal['prov:alternate2'] ?? null,
+                $this->requireRef($formal['prov:alternate1'] ?? null, 'alternate1', $jsonKey),
+                $this->requireRef($formal['prov:alternate2'] ?? null, 'alternate2', $jsonKey),
                 $extra,
             ),
             'hadMember' => new Membership(
@@ -937,28 +919,28 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             ),
             'mentionOf' => new Mention(
                 $deserId,
-                $formal['prov:specificEntity'] ?? null,
-                $formal['prov:generalEntity'] ?? null,
+                $this->requireRef($formal['prov:specificEntity'] ?? null, 'specificEntity', $jsonKey),
+                $this->requireRef($formal['prov:generalEntity'] ?? null, 'generalEntity', $jsonKey),
                 $formal['prov:bundle'] ?? null,
                 $extra,
             ),
             'hadDictionaryMember' => new DictionaryMembership(
                 $deserId,
-                $formal['prov:dictionary'] ?? null,
+                $this->requireRef($formal['prov:dictionary'] ?? null, 'dictionary', $jsonKey),
                 $this->deserializeKeyEntitySet($formal['prov:key-entity-set'] ?? null, $nsManager),
                 $extra,
             ),
             'derivedByInsertionFrom' => new DictionaryInsertion(
                 $deserId,
-                $formal['prov:after'] ?? null,
-                $formal['prov:before'] ?? null,
+                $this->requireRef($formal['prov:after'] ?? null, 'after', $jsonKey),
+                $this->requireRef($formal['prov:before'] ?? null, 'before', $jsonKey),
                 $this->deserializeKeyEntitySet($formal['prov:key-entity-set'] ?? null, $nsManager),
                 $extra,
             ),
             'derivedByRemovalFrom' => new DictionaryRemoval(
                 $deserId,
-                $formal['prov:after'] ?? null,
-                $formal['prov:before'] ?? null,
+                $this->requireRef($formal['prov:after'] ?? null, 'after', $jsonKey),
+                $this->requireRef($formal['prov:before'] ?? null, 'before', $jsonKey),
                 $this->deserializeKeySet($formal['prov:key-set'] ?? [], $nsManager),
                 $extra,
             ),
@@ -967,6 +949,23 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         if ($record !== null) {
             $records[] = $record;
         }
+    }
+
+    /**
+     * Enforces a PROV-DM-mandatory relation endpoint. A malformed document
+     * omitting it is invalid input, not an internal error.
+     *
+     * @throws \Prov\Exception\DeserializationException
+     *   When `$value` is null.
+     */
+    private function requireRef(?QualifiedName $value, string $prop, string $jsonKey): QualifiedName
+    {
+        if ($value === null) {
+            throw new DeserializationException(
+                "Invalid PROV-JSON: '{$jsonKey}' is missing a required value for 'prov:{$prop}'.",
+            );
+        }
+        return $value;
     }
 
     /**

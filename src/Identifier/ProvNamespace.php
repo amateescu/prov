@@ -66,20 +66,6 @@ readonly class ProvNamespace implements \Stringable
         return new QualifiedName($this, $localPart);
     }
 
-    /**
-     * Whether the given QualifiedName's URI begins with this namespace's URI.
-     *
-     * This is a raw prefix test with no longest-match or local-part guard: an
-     * identifier under a nested namespace (`http://e/sub/x`) also reports true
-     * for the parent (`http://e/`). It is not safe for resolving a URI to its
-     * most specific namespace; use `NamespaceManager::resolveUri()` or
-     * `uriToPrefixed()` for that.
-     */
-    public function contains(QualifiedName $identifier): bool
-    {
-        return str_starts_with($identifier->getUri(), $this->uri);
-    }
-
     public function __toString(): string
     {
         return $this->uri;

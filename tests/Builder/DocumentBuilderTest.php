@@ -509,6 +509,26 @@ final class DocumentBuilderTest extends TestCase
         $this->assertSame('http://example.org/myEntity', $doc->entities[0]->identifier->uri);
     }
 
+    public function testGetNamespaceManagerReflectsRegisteredNamespaces(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->addNamespace($this->ex);
+
+        $manager = $builder->getNamespaceManager();
+
+        $this->assertSame($this->ex, $manager->getNamespace('ex'));
+    }
+
+    public function testGetNamespaceManagerSharesLiveStateNotASnapshot(): void
+    {
+        $builder = new DocumentBuilder();
+        $manager = $builder->getNamespaceManager();
+
+        $builder->addNamespace($this->ex);
+
+        $this->assertSame($this->ex, $manager->getNamespace('ex'));
+    }
+
     public function testResolveAttributeArrayWithUnresolvableKeyThrows(): void
     {
         $this->expectException(NamespaceException::class);

@@ -18,9 +18,9 @@ readonly class DictionaryInsertion extends ProvRelation
      * @param list<\Prov\Relation\Dictionary\DictionaryEntry> $keyEntityPairs
      */
     public function __construct(
-        ?QualifiedName $identifier = null,
-        public ?QualifiedName $after = null,
-        public ?QualifiedName $before = null,
+        ?QualifiedName $identifier,
+        public QualifiedName $after,
+        public QualifiedName $before,
         public array $keyEntityPairs = [],
         Attributes $attributes = new Attributes(),
     ) {

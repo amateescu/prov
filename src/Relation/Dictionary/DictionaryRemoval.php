@@ -18,9 +18,9 @@ readonly class DictionaryRemoval extends ProvRelation
      * @param list<mixed> $removedKeys
      */
     public function __construct(
-        ?QualifiedName $identifier = null,
-        public ?QualifiedName $after = null,
-        public ?QualifiedName $before = null,
+        ?QualifiedName $identifier,
+        public QualifiedName $after,
+        public QualifiedName $before,
         public array $removedKeys = [],
         Attributes $attributes = new Attributes(),
     ) {

@@ -160,11 +160,7 @@ class ConstraintValidator
     private function checkConstraint52(RecordIndex $index, ConstraintViolationList $violations): void
     {
         foreach ($index->getSpecializations() as $spec) {
-            if (
-                $spec->specificEntity !== null
-                && $spec->generalEntity !== null
-                && $spec->specificEntity->getUri() === $spec->generalEntity->getUri()
-            ) {
+            if ($spec->specificEntity->getUri() === $spec->generalEntity->getUri()) {
                 $violations->add(
                     new ConstraintViolation(
                         ConstraintId::ImpossibleSpecializationReflexive,
@@ -300,7 +296,7 @@ class ConstraintValidator
     {
         $groups = [];
         foreach ($index->getGenerations() as $record) {
-            if ($record->entity === null || $record->activity === null) {
+            if ($record->activity === null) {
                 continue;
             }
             $this->collectUniqueEventGroup($groups, $record, $record->entity->getUri(), $record->activity->getUri());
@@ -318,7 +314,7 @@ class ConstraintValidator
     {
         $groups = [];
         foreach ($index->getInvalidations() as $record) {
-            if ($record->entity === null || $record->activity === null) {
+            if ($record->activity === null) {
                 continue;
             }
             $this->collectUniqueEventGroup($groups, $record, $record->entity->getUri(), $record->activity->getUri());

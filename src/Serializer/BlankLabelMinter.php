@@ -32,7 +32,7 @@ final class BlankLabelMinter
 
     private int $counter = 0;
 
-    /** @var array<string, true>|null Blank labels the document already uses; collected lazily. */
+    /** @var array<string, bool>|null Blank labels the document already uses; collected lazily. */
     private ?array $usedLabels = null;
 
     public function __construct(
@@ -61,7 +61,7 @@ final class BlankLabelMinter
     }
 
     /**
-     * @return array<string, true>
+     * @return array<string, bool>
      */
     private function collectUsedLabels(): array
     {
@@ -99,7 +99,7 @@ final class BlankLabelMinter
 
     /**
      * @param array<array-key, mixed> $items
-     * @param array<string, true> $labels
+     * @param array<string, bool> $labels
      */
     private function collectDictionaryLabels(array $items, array &$labels): void
     {
