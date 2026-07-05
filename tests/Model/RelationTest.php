@@ -57,18 +57,18 @@ final class RelationTest extends TestCase
         $this->assertInstanceOf(ProvRelation::class, $gen);
     }
 
-    public function testGenerationAllNullable(): void
+    public function testGenerationOptionalFormalsAreNullable(): void
     {
-        $gen = new Generation();
+        $gen = new Generation(identifier: null, entity: $this->qn('e1'));
         $this->assertNull($gen->identifier);
-        $this->assertNull($gen->entity);
+        $this->assertSame('http://example.org/e1', $gen->entity->uri);
         $this->assertNull($gen->activity);
         $this->assertNull($gen->time);
     }
 
     public function testUsageFormalAttributes(): void
     {
-        $usage = new Usage(activity: $this->qn('a1'), entity: $this->qn('e1'));
+        $usage = new Usage(identifier: null, activity: $this->qn('a1'), entity: $this->qn('e1'));
 
         $this->assertSame('http://example.org/a1', $usage->activity->uri);
         $this->assertSame('http://example.org/e1', $usage->entity->uri);
@@ -134,11 +134,11 @@ final class RelationTest extends TestCase
         $this->assertInstanceOf(ProvRelationInterface::class, $inv);
     }
 
-    public function testInvalidationAllNullable(): void
+    public function testInvalidationOptionalFormalsAreNullable(): void
     {
-        $inv = new Invalidation();
+        $inv = new Invalidation(identifier: null, entity: $this->qn('e1'));
         $this->assertNull($inv->identifier);
-        $this->assertNull($inv->entity);
+        $this->assertSame('http://example.org/e1', $inv->entity->uri);
         $this->assertNull($inv->activity);
         $this->assertNull($inv->time);
     }
@@ -196,7 +196,7 @@ final class RelationTest extends TestCase
 
     public function testSpecializationFormalAttributes(): void
     {
-        $spec = new Specialization(specificEntity: $this->qn('e1'), generalEntity: $this->qn('e2'));
+        $spec = new Specialization(identifier: null, specificEntity: $this->qn('e1'), generalEntity: $this->qn('e2'));
 
         $this->assertSame('http://example.org/e1', $spec->specificEntity->uri);
         $this->assertSame('http://example.org/e2', $spec->generalEntity->uri);
@@ -204,7 +204,7 @@ final class RelationTest extends TestCase
 
     public function testAlternateFormalAttributes(): void
     {
-        $alt = new Alternate(alternate1: $this->qn('e1'), alternate2: $this->qn('e2'));
+        $alt = new Alternate(identifier: null, alternate1: $this->qn('e1'), alternate2: $this->qn('e2'));
 
         $this->assertSame('http://example.org/e1', $alt->alternate1->uri);
         $this->assertSame('http://example.org/e2', $alt->alternate2->uri);
@@ -223,7 +223,7 @@ final class RelationTest extends TestCase
         $prov = new ProvNamespace('prov', 'http://www.w3.org/ns/prov#');
         $attrs = Attributes::single($prov->qualifiedName('type'), 'Revision');
 
-        $gen = new Generation(entity: $this->qn('e1'), attributes: $attrs);
+        $gen = new Generation(identifier: null, entity: $this->qn('e1'), attributes: $attrs);
 
         $this->assertFalse($gen->attributes->isEmpty());
     }

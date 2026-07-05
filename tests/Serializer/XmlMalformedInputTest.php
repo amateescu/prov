@@ -50,6 +50,27 @@ final class XmlMalformedInputTest extends TestCase
                     . '<prov:wasGeneratedBy><prov:entity prov:ref="ex:e1"/>'
                     . '<prov:time>garbage</prov:time></prov:wasGeneratedBy></prov:document>',
             ],
+            'wasGeneratedBy missing entity' => [
+                '<prov:document xmlns:prov="'
+                    . $ns
+                    . '" xmlns:ex="http://e/">'
+                    . '<prov:wasGeneratedBy><prov:activity prov:ref="ex:a1"/></prov:wasGeneratedBy>'
+                    . '</prov:document>',
+            ],
+            'specializationOf missing specificEntity' => [
+                '<prov:document xmlns:prov="'
+                    . $ns
+                    . '" xmlns:ex="http://e/">'
+                    . '<prov:specializationOf><prov:generalEntity prov:ref="ex:e2"/></prov:specializationOf>'
+                    . '</prov:document>',
+            ],
+            'hadDictionaryMember missing dictionary' => [
+                '<prov:document xmlns:prov="'
+                    . $ns
+                    . '" xmlns:ex="http://e/">'
+                    . '<prov:hadDictionaryMember/>'
+                    . '</prov:document>',
+            ],
         ];
     }
 

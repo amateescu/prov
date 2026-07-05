@@ -396,4 +396,46 @@ final class NamespaceManagerTest extends TestCase
         $this->assertSame('http://child.example/prov#', $child->resolve('prov:Entity')->namespace->uri);
         $this->assertSame('http://parent.example/prov#', $parent->resolve('prov:Entity')->namespace->uri);
     }
+
+    public function testForContainerRoutesDefaultPrefixToSetDefault(): void
+    {
+        $manager = NamespaceManager::forContainer([
+            new ProvNamespace('ex', 'http://example.org/'),
+            new ProvNamespace('default', 'http://default.org/'),
+        ]);
+
+        $qn = $manager->resolve('myEntity');
+        $this->assertSame('http://default.org/myEntity', $qn->uri);
+        $this->assertSame('http://example.org/', $manager->getNamespace('ex')->uri);
+    }
+
+    public function testForContainerRebindsBuiltinsLikeAddOrReplace(): void
+    {
+        $manager = NamespaceManager::forContainer([
+            new ProvNamespace('prov', 'http://other.org/prov#'),
+        ]);
+
+        $this->assertSame('http://other.org/prov#', $manager->getNamespace('prov')->uri);
+    }
+
+    public function testForContainerAcceptsParent(): void
+    {
+        $parent = new NamespaceManager();
+        $parent->add(new ProvNamespace('ex', 'http://example.org/'));
+
+        $child = NamespaceManager::forContainer([], $parent);
+
+        $qn = $child->resolve('ex:entity1');
+        $this->assertSame('http://example.org/entity1', $qn->uri);
+    }
+
+    public function testStripDefaultSentinelRemovesReservedPrefix(): void
+    {
+        $this->assertSame('title', NamespaceManager::stripDefaultSentinel('default:title'));
+    }
+
+    public function testStripDefaultSentinelLeavesOtherKeysUntouched(): void
+    {
+        $this->assertSame('dct:title', NamespaceManager::stripDefaultSentinel('dct:title'));
+    }
 }

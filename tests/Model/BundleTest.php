@@ -56,7 +56,7 @@ final class BundleTest extends TestCase
 
     public function testGetRelations(): void
     {
-        $gen = new Generation(entity: $this->ex->qualifiedName('e1'));
+        $gen = new Generation(identifier: null, entity: $this->ex->qualifiedName('e1'));
         $e1 = new Entity($this->ex->qualifiedName('e1'));
 
         $bundle = new Bundle($this->ex->qualifiedName('b1'), [$e1, $gen], []);
@@ -66,7 +66,7 @@ final class BundleTest extends TestCase
     public function testGetRecordsByType(): void
     {
         $e1 = new Entity($this->ex->qualifiedName('e1'));
-        $gen = new Generation(entity: $this->ex->qualifiedName('e1'));
+        $gen = new Generation(identifier: null, entity: $this->ex->qualifiedName('e1'));
 
         $bundle = new Bundle($this->ex->qualifiedName('b1'), [$e1, $gen], []);
 

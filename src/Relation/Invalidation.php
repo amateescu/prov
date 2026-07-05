@@ -15,8 +15,8 @@ use Prov\Model\ProvRelation;
 readonly class Invalidation extends ProvRelation
 {
     public function __construct(
-        ?QualifiedName $identifier = null,
-        public ?QualifiedName $entity = null,
+        ?QualifiedName $identifier,
+        public QualifiedName $entity,
         public ?QualifiedName $activity = null,
         public ?\DateTimeImmutable $time = null,
         Attributes $attributes = new Attributes(),

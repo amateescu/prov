@@ -8,7 +8,10 @@ use PHPUnit\Framework\TestCase;
 use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
 use Prov\Builder\DocumentBuilder;
+use Prov\Document;
+use Prov\Entity;
 use Prov\Identifier\ProvNamespace;
+use Prov\Relation\Mention;
 use Prov\Serializer\JsonLdSerializer;
 
 final class JsonLdSerializerTest extends TestCase
@@ -492,10 +495,22 @@ final class JsonLdSerializerTest extends TestCase
 
     public function testMentionWithoutBundleIsPlainReference(): void
     {
-        $builder = $this->buildDoc();
-        $builder->entity('ex:specific');
-        $builder->mentionOf(specificEntity: 'ex:specific', generalEntity: 'ex:general');
-        $data = $this->serializeToArray($builder);
+        // The builder requires a mention's bundle, so a bundle-less mention can
+        // only arrive via deserialization; the serializer must still emit it as
+        // a plain reference rather than an `asInBundle` object.
+        $doc = new Document(
+            [
+                new Entity($this->ex->qualifiedName('specific')),
+                new Mention(
+                    identifier: null,
+                    specificEntity: $this->ex->qualifiedName('specific'),
+                    generalEntity: $this->ex->qualifiedName('general'),
+                ),
+            ],
+            [],
+            [$this->ex],
+        );
+        $data = json_decode($this->serializer->serialize($doc), true);
 
         $node = $this->getNode($data, 'ex:specific');
         $this->assertSame(['@id' => 'ex:general'], $node['prov:mentionOf']);

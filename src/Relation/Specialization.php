@@ -15,9 +15,9 @@ use Prov\Model\ProvRelation;
 readonly class Specialization extends ProvRelation
 {
     public function __construct(
-        ?QualifiedName $identifier = null,
-        public ?QualifiedName $specificEntity = null,
-        public ?QualifiedName $generalEntity = null,
+        ?QualifiedName $identifier,
+        public QualifiedName $specificEntity,
+        public QualifiedName $generalEntity,
         Attributes $attributes = new Attributes(),
     ) {
         parent::__construct($identifier, $attributes);

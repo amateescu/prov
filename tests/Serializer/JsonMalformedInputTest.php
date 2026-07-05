@@ -53,6 +53,30 @@ final class JsonMalformedInputTest extends TestCase
             'bundle section is a scalar' => ['{"bundle": "notamap"}'],
             'bundle body is a scalar' => ['{"bundle": {"ex:b": "notamap"}}'],
             'bundle prefix section is a scalar' => ['{"bundle": {"ex:b": {"prefix": "notamap"}}}'],
+            'wasGeneratedBy missing entity' => [
+                '{"prefix":{"ex":"http://e/"},"wasGeneratedBy":{"_:g1":{"prov:activity":"ex:a1"}}}',
+            ],
+            'wasInvalidatedBy missing entity' => [
+                '{"prefix":{"ex":"http://e/"},"wasInvalidatedBy":{"_:i1":{"prov:activity":"ex:a1"}}}',
+            ],
+            'specializationOf missing specificEntity' => [
+                '{"prefix":{"ex":"http://e/"},"specializationOf":{"_:s1":{"prov:generalEntity":"ex:e2"}}}',
+            ],
+            'alternateOf missing alternate1' => [
+                '{"prefix":{"ex":"http://e/"},"alternateOf":{"_:a1":{"prov:alternate2":"ex:e2"}}}',
+            ],
+            'mentionOf missing specificEntity' => [
+                '{"prefix":{"ex":"http://e/"},"mentionOf":{"_:m1":{"prov:generalEntity":"ex:e2","prov:bundle":"ex:b1"}}}',
+            ],
+            'hadDictionaryMember missing dictionary' => [
+                '{"prefix":{"ex":"http://e/"},"hadDictionaryMember":{"_:d1":{"prov:key-entity-set":[]}}}',
+            ],
+            'derivedByInsertionFrom missing after' => [
+                '{"prefix":{"ex":"http://e/"},"derivedByInsertionFrom":{"_:di1":{"prov:before":"ex:d1"}}}',
+            ],
+            'derivedByRemovalFrom missing before' => [
+                '{"prefix":{"ex":"http://e/"},"derivedByRemovalFrom":{"_:dr1":{"prov:after":"ex:d2"}}}',
+            ],
         ];
     }
 

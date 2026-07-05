@@ -18,8 +18,8 @@ readonly class DictionaryMembership extends ProvRelation
      * @param list<\Prov\Relation\Dictionary\DictionaryEntry> $keyEntityPairs
      */
     public function __construct(
-        ?QualifiedName $identifier = null,
-        public ?QualifiedName $dictionary = null,
+        ?QualifiedName $identifier,
+        public QualifiedName $dictionary,
         public array $keyEntityPairs = [],
         Attributes $attributes = new Attributes(),
     ) {

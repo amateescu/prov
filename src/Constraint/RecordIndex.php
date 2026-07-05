@@ -131,10 +131,7 @@ class RecordIndex
                 $this->activityRecords[] = $record;
             } elseif ($record instanceof Generation) {
                 $this->generations[] = $record;
-                $eUri = $record->entity?->getUri();
-                if ($eUri !== null) {
-                    $this->generationsByEntity[$eUri][] = $record;
-                }
+                $this->generationsByEntity[$record->entity->getUri()][] = $record;
             } elseif ($record instanceof Usage) {
                 $this->usages[] = $record;
                 $eUri = $record->entity?->getUri();
@@ -143,10 +140,7 @@ class RecordIndex
                 }
             } elseif ($record instanceof Invalidation) {
                 $this->invalidations[] = $record;
-                $eUri = $record->entity?->getUri();
-                if ($eUri !== null) {
-                    $this->invalidationsByEntity[$eUri][] = $record;
-                }
+                $this->invalidationsByEntity[$record->entity->getUri()][] = $record;
             } elseif ($record instanceof Start) {
                 $this->starts[] = $record;
                 $aUri = $record->activity?->getUri();

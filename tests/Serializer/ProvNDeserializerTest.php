@@ -198,6 +198,27 @@ final class ProvNDeserializerTest extends TestCase
         $this->assertCount(1, $doc->getRecordsByType(Usage::class));
     }
 
+    public function testUsedEntityIsOptional(): void
+    {
+        // PROV-DM marks usage's entity as optional, and the PROV-N grammar
+        // puts the marker on the entity slot: used(id; a, e-or-marker, ...).
+        // Both the omitted form and the explicit marker are valid input.
+        $doc = $this->parse(<<<'PROVN'
+            document
+            prefix ex <http://example.org/>
+            used(ex:a1)
+            used(ex:u1; ex:a2, -, -)
+            endDocument
+            PROVN);
+
+        $usages = $doc->getRecordsByType(Usage::class);
+        $this->assertCount(2, $usages);
+        $this->assertSame('http://example.org/a1', $usages[0]->activity->uri);
+        $this->assertNull($usages[0]->entity);
+        $this->assertSame('http://example.org/a2', $usages[1]->activity->uri);
+        $this->assertNull($usages[1]->entity);
+    }
+
     public function testWasInformedBy(): void
     {
         $doc = $this->parse("document\nprefix ex <http://example.org/>\nwasInformedBy(ex:a2, ex:a1)\nendDocument");

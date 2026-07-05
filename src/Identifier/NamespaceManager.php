@@ -42,6 +42,42 @@ class NamespaceManager
     }
 
     /**
+     * Builds a manager preloaded from a container's declared namespaces (a
+     * Document's, a Bundle's, or a foreign document's parsed prefix map),
+     * routing the reserved "default" prefix to `setDefault()` and everything
+     * else to `addOrReplace()`. This is the shape every serializer,
+     * deserializer, and `ProvGraph` needs: the source document is the
+     * authority on its own declarations, so a redeclared or non-canonical
+     * prov/xsd binding replaces the built-in rather than throwing.
+     *
+     * @param iterable<\Prov\Identifier\ProvNamespace> $namespaces
+     */
+    public static function forContainer(iterable $namespaces, ?NamespaceManager $parent = null): self
+    {
+        $manager = new self($parent);
+        foreach ($namespaces as $ns) {
+            if ($ns->prefix === 'default') {
+                $manager->setDefault($ns);
+            } else {
+                $manager->addOrReplace($ns);
+            }
+        }
+        return $manager;
+    }
+
+    /**
+     * Strips the reserved "default:" sentinel a prefixed key resolves to when
+     * its URI belongs to the default namespace, leaving the bare local name
+     * to resolve against the format's own default-namespace mechanism
+     * (PROV-N's `default <uri>` declaration, PROV-JSON's `default` prefix
+     * entry, JSON-LD's `@vocab`). The sentinel itself must never be written.
+     */
+    public static function stripDefaultSentinel(string $key): string
+    {
+        return str_starts_with($key, 'default:') ? substr($key, strlen('default:')) : $key;
+    }
+
+    /**
      * Registers a namespace, throwing on any conflict.
      *
      * Re-registering a prefix with the same URI is a no-op (the existing

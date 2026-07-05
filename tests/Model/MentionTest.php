@@ -25,6 +25,7 @@ final class MentionTest extends TestCase
     public function testMentionConstruction(): void
     {
         $men = new Mention(
+            identifier: null,
             specificEntity: $this->ex->qualifiedName('e1'),
             generalEntity: $this->ex->qualifiedName('e2'),
             bundle: $this->ex->qualifiedName('b1'),

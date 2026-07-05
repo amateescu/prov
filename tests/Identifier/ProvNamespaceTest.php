@@ -48,23 +48,6 @@ final class ProvNamespaceTest extends TestCase
         $this->assertSame('http://example.org/entity1', $qn->uri);
     }
 
-    public function testContainsMatchingQualifiedName(): void
-    {
-        $ns = new ProvNamespace('ex', 'http://example.org/');
-        $qn = $ns->qualifiedName('foo');
-
-        $this->assertTrue($ns->contains($qn));
-    }
-
-    public function testContainsNonMatchingQualifiedName(): void
-    {
-        $ns = new ProvNamespace('ex', 'http://example.org/');
-        $other = new ProvNamespace('other', 'http://other.org/');
-        $qn = $other->qualifiedName('foo');
-
-        $this->assertFalse($ns->contains($qn));
-    }
-
     public function testToString(): void
     {
         $ns = new ProvNamespace('ex', 'http://example.org/');

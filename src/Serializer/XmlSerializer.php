@@ -733,14 +733,15 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $t = static fn(string $k) => isset($formals[$k]) && $formals[$k] instanceof \DateTimeImmutable
             ? $formals[$k]
             : null;
+        $rq = fn(string $k) => $this->requireRef($q($k), $k, $relName);
 
         $record = match ($relName) {
-            'wasGeneratedBy' => new Generation($id, $q('entity'), $q('activity'), $t('time'), $attrs),
+            'wasGeneratedBy' => new Generation($id, $rq('entity'), $q('activity'), $t('time'), $attrs),
             'used' => new Usage($id, $q('activity'), $q('entity'), $t('time'), $attrs),
             'wasInformedBy' => new Communication($id, $q('informed'), $q('informant'), $attrs),
             'wasStartedBy' => new Start($id, $q('activity'), $q('trigger'), $q('starter'), $t('time'), $attrs),
             'wasEndedBy' => new End($id, $q('activity'), $q('trigger'), $q('ender'), $t('time'), $attrs),
-            'wasInvalidatedBy' => new Invalidation($id, $q('entity'), $q('activity'), $t('time'), $attrs),
+            'wasInvalidatedBy' => new Invalidation($id, $rq('entity'), $q('activity'), $t('time'), $attrs),
             'wasDerivedFrom' => new Derivation(
                 $id,
                 $q('generatedEntity'),
@@ -754,15 +755,32 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             'wasAssociatedWith' => new Association($id, $q('activity'), $q('agent'), $q('plan'), $attrs),
             'actedOnBehalfOf' => new Delegation($id, $q('delegate'), $q('responsible'), $q('activity'), $attrs),
             'wasInfluencedBy' => new Influence($id, $q('influencee'), $q('influencer'), $attrs),
-            'specializationOf' => new Specialization($id, $q('specificEntity'), $q('generalEntity'), $attrs),
-            'alternateOf' => new Alternate($id, $q('alternate1'), $q('alternate2'), $attrs),
+            'specializationOf' => new Specialization($id, $rq('specificEntity'), $rq('generalEntity'), $attrs),
+            'alternateOf' => new Alternate($id, $rq('alternate1'), $rq('alternate2'), $attrs),
             'hadMember' => new Membership($id, $q('collection'), $q('entity'), $attrs),
-            'mentionOf' => new Mention($id, $q('specificEntity'), $q('generalEntity'), $q('bundle'), $attrs),
+            'mentionOf' => new Mention($id, $rq('specificEntity'), $rq('generalEntity'), $q('bundle'), $attrs),
             default => null,
         };
         if ($record !== null) {
             $records[] = $record;
         }
+    }
+
+    /**
+     * Enforces a PROV-DM-mandatory relation endpoint. A malformed document
+     * omitting it is invalid input, not an internal error.
+     *
+     * @throws \Prov\Exception\DeserializationException
+     *   When `$value` is null.
+     */
+    private function requireRef(?QualifiedName $value, string $prop, string $relName): QualifiedName
+    {
+        if ($value === null) {
+            throw new DeserializationException(
+                "Invalid PROV-XML: '{$relName}' is missing a required value for '{$prop}'.",
+            );
+        }
+        return $value;
     }
 
     /**
@@ -808,15 +826,26 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $oldDictQn = $oldDict !== null ? $nsManager->resolve($oldDict) : null;
 
         $record = match ($relName) {
-            'hadDictionaryMember' => new DictionaryMembership($id, $dictQn, $keyEntityPairs, $extraAttrs),
-            'derivedByInsertionFrom' => new DictionaryInsertion(
+            'hadDictionaryMember' => new DictionaryMembership(
                 $id,
-                $newDictQn,
-                $oldDictQn,
+                $this->requireRef($dictQn, 'dictionary', $relName),
                 $keyEntityPairs,
                 $extraAttrs,
             ),
-            'derivedByRemovalFrom' => new DictionaryRemoval($id, $newDictQn, $oldDictQn, $removedKeys, $extraAttrs),
+            'derivedByInsertionFrom' => new DictionaryInsertion(
+                $id,
+                $this->requireRef($newDictQn, 'after', $relName),
+                $this->requireRef($oldDictQn, 'before', $relName),
+                $keyEntityPairs,
+                $extraAttrs,
+            ),
+            'derivedByRemovalFrom' => new DictionaryRemoval(
+                $id,
+                $this->requireRef($newDictQn, 'after', $relName),
+                $this->requireRef($oldDictQn, 'before', $relName),
+                $removedKeys,
+                $extraAttrs,
+            ),
             default => null,
         };
         if ($record !== null) {

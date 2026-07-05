@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
 use Prov\Builder\DocumentBuilder;
+use Prov\Document;
 use Prov\Entity;
 use Prov\Exception\DeserializationException;
 use Prov\Exception\ProvException;
@@ -256,6 +257,19 @@ final class JsonSerializerTest extends TestCase
         $this->assertSame('http://example.org/e2', $value->getUri());
     }
 
+    public function testDeserializeUsageWithoutEntity(): void
+    {
+        // PROV-DM marks usage's entity as optional; a record carrying only the
+        // mandatory activity is valid input.
+        $json = '{"prefix":{"ex":"http://example.org/"},"used":{"ex:u1":{"prov:activity":"ex:a1"}}}';
+        $doc = $this->serializer->deserialize($json);
+
+        $usages = $doc->getRecordsByType(Usage::class);
+        $this->assertCount(1, $usages);
+        $this->assertSame('http://example.org/a1', $usages[0]->activity->uri);
+        $this->assertNull($usages[0]->entity);
+    }
+
     public function testDeserializeRelations(): void
     {
         $json = '{"prefix":{"ex":"http://example.org/"},"wasGeneratedBy":{"ex:g1":{"prov:entity":"ex:e1","prov:activity":"ex:a1"}}}';
@@ -478,15 +492,15 @@ final class JsonSerializerTest extends TestCase
 
     public function testSerializeRelationWithAllNullFormals(): void
     {
-        $builder = $this->buildDoc();
-        $builder->wasGeneratedBy();
-
-        $doc = $builder->build();
+        // The builder requires each relation's mandatory endpoints, so a record
+        // with all-null formals can only reach the serializer via direct
+        // construction or deserialization. It must still serialize, under a
+        // blank node key.
+        $doc = new Document([new Communication()], [], [$this->ex]);
         $json = $this->serializer->serialize($doc);
         $data = json_decode($json, true);
 
-        // A relation with all-null formals still serializes (with a blank node key).
-        $this->assertArrayHasKey('wasGeneratedBy', $data);
+        $this->assertArrayHasKey('wasInformedBy', $data);
     }
 
     public function testDeserializeNonObjectJsonThrows(): void

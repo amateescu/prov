@@ -69,19 +69,11 @@ final class ProvGraph
 
     public function __construct(Document|Bundle $container)
     {
-        $nsManager = new NamespaceManager();
-        foreach ($container->namespaces as $ns) {
-            if ($ns->prefix === 'default') {
-                $nsManager->setDefault($ns);
-            } else {
-                // The container is the authority on its own declarations, so a
-                // non-canonical prov/xsd URI it carries (preserved verbatim
-                // through deserialization) replaces the built-in rather than
-                // throwing, matching how the serializers/deserializers read it.
-                $nsManager->addOrReplace($ns);
-            }
-        }
-        $this->nsManager = $nsManager;
+        // The container is the authority on its own declarations, so a
+        // non-canonical prov/xsd URI it carries (preserved verbatim through
+        // deserialization) replaces the built-in rather than throwing,
+        // matching how the serializers/deserializers read it.
+        $this->nsManager = NamespaceManager::forContainer($container->namespaces);
 
         $recordsByUri = [];
         foreach ($container->records as $record) {
