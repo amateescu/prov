@@ -53,6 +53,21 @@ final class JsonMalformedInputTest extends TestCase
             'bundle section is a scalar' => ['{"bundle": "notamap"}'],
             'bundle body is a scalar' => ['{"bundle": {"ex:b": "notamap"}}'],
             'bundle prefix section is a scalar' => ['{"bundle": {"ex:b": {"prefix": "notamap"}}}'],
+            'entity record body is a scalar' => [
+                '{"prefix":{"ex":"http://e/"},"entity":{"ex:e1":"notamap"}}',
+            ],
+            'activity record body is a scalar' => [
+                '{"prefix":{"ex":"http://e/"},"activity":{"ex:a1":"notamap"}}',
+            ],
+            'agent record body is a scalar' => [
+                '{"prefix":{"ex":"http://e/"},"agent":{"ex:ag1":"notamap"}}',
+            ],
+            'relation record body is a scalar' => [
+                '{"prefix":{"ex":"http://e/"},"wasGeneratedBy":{"_:g1":"notamap"}}',
+            ],
+            'scruffy relation instance is a scalar' => [
+                '{"prefix":{"ex":"http://e/"},"wasGeneratedBy":{"_:g1":[{"prov:entity":"ex:e1","prov:activity":"ex:a1"},"notamap"]}}',
+            ],
             'wasGeneratedBy missing entity' => [
                 '{"prefix":{"ex":"http://e/"},"wasGeneratedBy":{"_:g1":{"prov:activity":"ex:a1"}}}',
             ],

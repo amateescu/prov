@@ -20,11 +20,13 @@ use Prov\Relation\Usage;
 /**
  * Checks a Document against W3C PROV-CONSTRAINTS rules.
  *
- * Coverage is partial by design: 21 of 35 rules are implemented. The 14 unimplemented
- * rules (31-32, 35, 41-49) all require transitive graph reasoning over derivation
- * chains, which is deliberately out of scope for this validator. Use
- * `self::unsupportedConstraints()` to discover what's missing; a document that
- * violates only unsupported rules will report isValid() == true.
+ * Coverage is partial by design: 21 of 35 rules are implemented. Of the 14
+ * unimplemented rules, 22-23 are key/merging rules that require unifying records
+ * sharing an identifier across a document, and 31-32, 35, 41-49 require transitive
+ * graph reasoning over derivation chains; both kinds of reasoning are deliberately
+ * out of scope for this validator. Use `self::unsupportedConstraints()` to discover
+ * what's missing; a document that violates only unsupported rules will report
+ * isValid() == true.
  */
 class ConstraintValidator
 {

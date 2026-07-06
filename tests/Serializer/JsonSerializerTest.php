@@ -191,6 +191,32 @@ final class JsonSerializerTest extends TestCase
         $this->assertSame('prov:QUALIFIED_NAME', $attrVal['type']);
     }
 
+    public function testBackslashInLocalNameIsRejected(): void
+    {
+        // Mirrors ProvNSerializerTest::testBackslashInLocalNameIsRejected: both
+        // serializers route local-part escaping through the same
+        // QualifiedNameEscaper::escape(), which rejects a literal backslash
+        // because PN_CHARS_ESC has no escape for it.
+        $builder = $this->buildDoc();
+        $builder->entity('ex:bad\\name');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('backslash');
+        $output = $this->serializer->serialize($builder->build());
+        $this->assertIsString($output); // Unreachable: serialize() throws above.
+    }
+
+    public function testBackslashInAttributeKeyIsRejected(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1', ['ex:bad\\key' => 'value']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('backslash');
+        $output = $this->serializer->serialize($builder->build());
+        $this->assertIsString($output); // Unreachable: serialize() throws above.
+    }
+
     public function testSerializePrettyPrint(): void
     {
         $doc = $this->buildDoc()->entity('ex:e1')->build();
