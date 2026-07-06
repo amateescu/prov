@@ -148,6 +148,31 @@ final class ProvNDeserializerTest extends TestCase
         $this->assertSame('http://example.org/2024-01-15-report', $gens[0]->entity->uri);
     }
 
+    public function testFullDateTimeShapedIdentifierIsNotMisparsedAsDateTime(): void
+    {
+        // '2024-01-15T100000' is legal PN_LOCAL (no character in it needs
+        // escaping) and matches the full dateTime shape (date followed by
+        // 'T'), but it appears in the entity slot of wasGeneratedBy, which is
+        // not a formal time slot; only the grammar position, not the token
+        // shape, can tell an identifier from a datetime, so it must parse as
+        // an identifier here even though a dateTime-shaped token in the
+        // actual time slot still parses as a DateTimeImmutable.
+        $doc = $this->parse(<<<'PROVN'
+            document
+            default <http://example.org/>
+            prefix ex <http://example.org/ns/>
+            entity(2024-01-15T100000)
+            activity(ex:a1)
+            wasGeneratedBy(2024-01-15T100000, ex:a1, -)
+            endDocument
+            PROVN);
+        $this->assertCount(1, $doc->entities);
+        $this->assertSame('http://example.org/2024-01-15T100000', $doc->entities[0]->identifier->uri);
+        $gens = $doc->getRecordsByType(Generation::class);
+        $this->assertCount(1, $gens);
+        $this->assertSame('http://example.org/2024-01-15T100000', $gens[0]->entity->uri);
+    }
+
     public function testOffsetLessDateTimeIsTimezoneIndependent(): void
     {
         $original = date_default_timezone_get();

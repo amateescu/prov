@@ -510,7 +510,7 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function assertSafeLangTag(string $lang): void
     {
-        if (preg_match('/^[A-Za-z0-9-]+$/', $lang) !== 1) {
+        if (preg_match('/^[a-zA-Z0-9-]+$/', $lang) !== 1) {
             throw new \InvalidArgumentException("Language tag '{$lang}' is not a valid PROV-N language tag.");
         }
     }

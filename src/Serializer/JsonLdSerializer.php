@@ -183,6 +183,10 @@ class JsonLdSerializer implements ProvSerializerInterface
      * Mention keeps a hand-written shape (its object nests prov:asInBundle),
      * and the Dictionary extension relations have no PROV-O shortcut form.
      *
+     * A relation whose subject formal is null is omitted from the output:
+     * JSON-LD attaches a relation as a property of its subject node, so a
+     * relation with no subject has no node to attach to.
+     *
      * @param array<string, array<string, mixed>> $nodes
      */
     private function attachRelation(ProvRelation $relation, array &$nodes, NamespaceManager $nsManager): void

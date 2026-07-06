@@ -241,6 +241,23 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     }
 
     /**
+     * Checks that a decoded PROV-JSON record body is a map (a JSON object, or
+     * an empty array, since `json_decode(..., true)` cannot tell `{}` from
+     * `[]`). Per the PROV-JSON spec a record body is always a JSON object; a
+     * scalar body (e.g. `{"entity":{"ex:e1":"notamap"}}`) is malformed input
+     * and throws DeserializationException instead of being silently skipped.
+     *
+     * @return array<array-key, mixed>
+     */
+    private function assertRecordBody(mixed $body, string $recordType, string $id): array
+    {
+        if (!is_array($body)) {
+            throw new DeserializationException("Invalid PROV-JSON: the {$recordType} '{$id}' record must be a map.");
+        }
+        return $body;
+    }
+
+    /**
      * @param list<\Prov\Identifier\ProvNamespace> $namespaces
      * @param list<\Prov\Identifier\ProvNamespace> $parentNamespaces
      *
@@ -645,9 +662,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                     continue;
                 }
                 foreach ($this->unpackScruffy($attrs) as $instance) {
-                    if (!is_array($instance)) {
-                        continue;
-                    }
+                    $instance = $this->assertRecordBody($instance, 'entity', $idStr);
                     $records[] = new Entity(
                         $deserId,
                         $this->deserializeExtraAttributes($instance, $nsManager) ?? $emptyAttrs,
@@ -666,9 +681,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                     continue;
                 }
                 foreach ($this->unpackScruffy($attrs) as $instance) {
-                    if (!is_array($instance)) {
-                        continue;
-                    }
+                    $instance = $this->assertRecordBody($instance, 'activity', $idStr);
                     $startTime = isset($instance['prov:startTime'])
                         ? $this->parseDateTime($instance['prov:startTime'])
                         : null;
@@ -696,9 +709,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                     continue;
                 }
                 foreach ($this->unpackScruffy($attrs) as $instance) {
-                    if (!is_array($instance)) {
-                        continue;
-                    }
+                    $instance = $this->assertRecordBody($instance, 'agent', $idStr);
                     $records[] = new Agent(
                         $deserId,
                         $this->deserializeExtraAttributes($instance, $nsManager) ?? $emptyAttrs,
@@ -751,9 +762,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                 // Scruffy provenance: an ID can map to an array of instances.
                 if (is_array($attrs) && array_is_list($attrs)) {
                     foreach ($attrs as $instance) {
-                        if (!is_array($instance)) {
-                            continue;
-                        }
+                        $instance = $this->assertRecordBody($instance, $jsonKey, (string) $id);
                         $this->deserializeSingleRelation(
                             $jsonKey,
                             (string) $id,
@@ -766,9 +775,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                     continue;
                 }
 
-                if (!is_array($attrs)) {
-                    continue;
-                }
+                $attrs = $this->assertRecordBody($attrs, $jsonKey, (string) $id);
                 $this->deserializeSingleRelation($jsonKey, (string) $id, $attrs, $formalAttrs, $nsManager, $records);
             }
         }

@@ -447,16 +447,17 @@ class ProvNDeserializer implements ProvDeserializerInterface
 
         if ($ch >= '0' && $ch <= '9') {
             $val = $this->readUntilDelim();
+            // A date-prefixed token is only ever read as a datetime in a formal
+            // time slot (the caller says so via $expectTime); a default-namespace
+            // identifier like '2024-01-15-report' or '2024-01-15T100000' is legal
+            // PN_LOCAL and just happens to share the shape, so outside a time
+            // slot the token is always returned as a plain identifier string,
+            // whether or not it carries the full dateTime shape.
             $isDatePrefixed = strlen($val) >= 5 && $val[4] === '-' && preg_match('/^\d{4}-\d{2}-\d{2}/', $val) === 1;
-            if ($isDatePrefixed && preg_match('/^\d{4}-\d{2}-\d{2}T/', $val) === 1) {
-                return $this->parseDateTime($val);
-            }
-            // A date-prefixed token that is not a full dateTime is invalid in
-            // a formal time slot (the caller says so via $expectTime), but a
-            // default-namespace identifier like '2024-01-15-report' is legal
-            // PN_LOCAL and just happens to share the shape; only the grammar
-            // position, not the token shape, can tell the two apart.
-            if ($isDatePrefixed && $expectTime) {
+            if ($expectTime && $isDatePrefixed) {
+                if (preg_match('/^\d{4}-\d{2}-\d{2}T/', $val) === 1) {
+                    return $this->parseDateTime($val);
+                }
                 throw $this->err(
                     "Expected an xsd:dateTime value with a time component (e.g. 2024-01-01T00:00:00) but found '{$val}'.",
                 );
