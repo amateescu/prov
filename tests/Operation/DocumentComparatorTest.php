@@ -9,6 +9,7 @@ use Prov\Attribute\Literal;
 use Prov\Builder\DocumentBuilder;
 use Prov\Identifier\ProvNamespace;
 use Prov\Operation\DocumentComparator;
+use Prov\Serializer\JsonSerializer;
 
 final class DocumentComparatorTest extends TestCase
 {
@@ -341,21 +342,26 @@ final class DocumentComparatorTest extends TestCase
         $this->assertTrue(DocumentComparator::equals($a->build(), $b->build()));
     }
 
-    public function testDictionaryKeyTypedLiteralEqualsRawArrayAcrossPrefix(): void
+    public function testDictionaryKeyTypedLiteralEqualsDeserializedPrefixedDatatype(): void
     {
         // A dictionary key typed as a full-URI Literal must compare equal to the
-        // same key expressed as a raw PROV-JSON typed-literal array (prefixed
-        // datatype), since the comparator ignores prefixes.
+        // same key deserialized from a raw PROV-JSON typed-literal object using
+        // a prefixed datatype (xsd:int). Deserialization resolves the object to
+        // a real Literal, with its datatype QualifiedName resolved through the
+        // document's own namespace bindings, before it ever reaches a
+        // DictionaryEntry; the comparator never sees a raw array.
         $a = $this->buildDoc();
         $a->hadDictionaryMember('ex:dict', [
-            new \Prov\Relation\Dictionary\DictionaryEntry(Literal::int(5), null),
+            new \Prov\Relation\Dictionary\DictionaryEntry(Literal::int(5), $this->ex->qualifiedName('e1')),
         ]);
 
-        $b = $this->buildDoc();
-        $b->hadDictionaryMember('ex:dict', [
-            new \Prov\Relation\Dictionary\DictionaryEntry(['$' => '5', 'type' => 'xsd:int'], null),
-        ]);
+        $json =
+            '{"prefix":{"ex":"http://example.org/"},"hadDictionaryMember":{"_:m1":{'
+            . '"prov:dictionary":"ex:dict",'
+            . '"prov:key-entity-set":[{"key":{"$":"5","type":"xsd:int"},"$":"ex:e1"}]'
+            . '}}}';
+        $b = new JsonSerializer()->deserialize($json);
 
-        $this->assertTrue(DocumentComparator::equals($a->build(), $b->build()));
+        $this->assertTrue(DocumentComparator::equals($a->build(), $b));
     }
 }

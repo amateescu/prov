@@ -317,6 +317,7 @@ final class DocumentComparator
                 /** @var list<\Prov\Relation\Dictionary\DictionaryEntry> $value */
                 $parts[] = self::keyEntityPairsSignature($value, $blankLabels);
             } elseif (is_array($value) && $prop === 'removedKeys') {
+                /** @var list<QualifiedName|Literal|string|int|float|bool> $value */
                 $parts[] = self::removedKeysSignature($value);
             } else {
                 $parts[] = '';
@@ -345,23 +346,6 @@ final class DocumentComparator
     }
 
     /**
-     * Expands a `prefix:local` datatype written against a library built-in
-     * (xsd/prov) to its full URI, so a raw-array typed-literal key signs the
-     * same as a Literal. Any other prefix is returned unchanged: without a
-     * NamespaceManager it cannot be resolved, and custom datatypes are rare.
-     */
-    private static function expandDatatypePrefix(string $type): string
-    {
-        if (str_starts_with($type, 'xsd:')) {
-            return 'http://www.w3.org/2001/XMLSchema#' . substr($type, 4);
-        }
-        if (str_starts_with($type, 'prov:')) {
-            return 'http://www.w3.org/ns/prov#' . substr($type, 5);
-        }
-        return $type;
-    }
-
-    /**
      * @param list<\Prov\Relation\Dictionary\DictionaryEntry> $pairs
      * @param array<string, string> $blankLabels
      *
@@ -379,7 +363,7 @@ final class DocumentComparator
     }
 
     /**
-     * @param list<mixed> $keys
+     * @param list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool> $keys
      *
      * @return list<string>
      */
@@ -390,7 +374,7 @@ final class DocumentComparator
         return $sigs;
     }
 
-    private static function keySignature(mixed $key): string
+    private static function keySignature(QualifiedName|Literal|string|int|float|bool|null $key): string
     {
         if ($key instanceof QualifiedName || $key instanceof Literal) {
             return ValueIdentity::signature($key);
@@ -399,38 +383,6 @@ final class DocumentComparator
             // Bare string keys default to xsd:string in PROV-DM. Sign them like a Literal
             // so `"foo"` and `Literal("foo", xsd:string)` compare equal.
             return ValueIdentity::signature($key);
-        }
-        if (is_array($key)) {
-            // Typed-literal arrays from PROV-JSON: {"$": value, "type": datatype}
-            // or {"$": value, "lang": code}. Reconstruct enough of the literal to
-            // match an equivalent Literal instance from another format.
-            if (isset($key['$']) && is_string($key['$'])) {
-                $lang = isset($key['lang']) && is_string($key['lang']) ? $key['lang'] : null;
-                $type = isset($key['type']) && is_string($key['type']) ? $key['type'] : null;
-
-                if ($type === null && $lang === null) {
-                    return ValueIdentity::signature($key['$']);
-                }
-                if ($type === 'xsd:string' && $lang === null) {
-                    return ValueIdentity::signature($key['$']);
-                }
-                $sig = 'lit:' . $key['$'];
-                if ($type !== null && $type !== 'xsd:string') {
-                    // Sign by full datatype URI, matching valueSignature(): a key
-                    // typed `xsd:int` in PROV-JSON must compare equal to the same
-                    // key as a Literal carrying the full XSD URI in another format.
-                    $sig .= '^^' . ValueIdentity::normalizeDatatypeUri(self::expandDatatypePrefix($type));
-                }
-                if ($lang !== null) {
-                    $sig .= '@' . $lang;
-                }
-                return $sig;
-            }
-            ksort($key);
-            return 'arr:' . (string) json_encode($key);
-        }
-        if (is_object($key)) {
-            return $key::class . ':' . spl_object_hash($key);
         }
         if (is_scalar($key)) {
             return gettype($key) . ':' . var_export($key, true);

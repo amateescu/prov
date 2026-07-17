@@ -230,7 +230,6 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                 $el->appendChild($kep);
             }
         } elseif ($record instanceof DictionaryRemoval) {
-            // @mago-expect analysis:mixed-assignment
             foreach ($record->removedKeys as $key) {
                 $keyEl = $dom->createElementNS(self::PROV_NS, 'prov:key');
                 $this->setTypedTextContent($keyEl, $key, $nsManager);

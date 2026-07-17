@@ -11,16 +11,14 @@ use Prov\Identifier\QualifiedName;
  * A single key → entity pair carried by PROV-DICT relations (hadDictionaryMember,
  * derivedByInsertionFrom).
  *
- * The key is `mixed` by spec: PROV-DICT allows arbitrary typed literals, QualifiedName
- * keys, and (on the deserialization side) raw passthrough values from untyped JSON.
- * The `array` arm of `$key` is that raw JSON shape and cannot be narrowed natively.
- *
- * @mago-ignore analysis:imprecise-type
+ * PROV-DICT allows arbitrary typed literals or QualifiedName keys. Every
+ * deserializer resolves a key to one of these before constructing the entry;
+ * none of them keep the raw JSON-object shape a typed value arrives in.
  */
 final readonly class DictionaryEntry
 {
     public function __construct(
-        public QualifiedName|Literal|string|int|float|bool|array|null $key,
+        public QualifiedName|Literal|string|int|float|bool|null $key,
         public ?QualifiedName $entity,
     ) {}
 }

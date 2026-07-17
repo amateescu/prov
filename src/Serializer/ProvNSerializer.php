@@ -298,7 +298,7 @@ class ProvNSerializer implements ProvSerializerInterface
      * Formats a list of removed keys as the PROV-N `{key, ...}` set used
      * by derivedByRemovalFrom.
      *
-     * @param list<mixed> $keys
+     * @param list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool> $keys
      */
     private function formatKeySet(array $keys): string
     {
@@ -306,7 +306,6 @@ class ProvNSerializer implements ProvSerializerInterface
             return '{}';
         }
         $items = [];
-        // @mago-expect analysis:mixed-assignment
         foreach ($keys as $key) {
             $items[] = $this->formatDictKey($key);
         }
@@ -314,32 +313,15 @@ class ProvNSerializer implements ProvSerializerInterface
     }
 
     /**
-     * Formats the full `DictionaryEntry::$key` union (QN/Literal/scalar/array/null)
-     * as a PROV-N token. Arrays carry a raw JSON typed value from deserialization.
+     * Formats the full `DictionaryEntry::$key` union (QN/Literal/scalar/null)
+     * as a PROV-N token.
      */
-    private function formatDictKey(mixed $key): string
+    private function formatDictKey(QualifiedName|Literal|string|int|float|bool|null $key): string
     {
         if ($key === null) {
             return '-';
         }
-        if (is_array($key)) {
-            $val = is_scalar($key['$'] ?? null) ? (string) $key['$'] : '';
-            $type = isset($key['type']) && is_string($key['type']) ? $key['type'] : null;
-            $lang = isset($key['lang']) && is_string($key['lang']) ? $key['lang'] : null;
-            if ($type !== null) {
-                $this->assertSafeAttributeKey($type);
-                return '"' . $this->escapeString($val) . '" %% ' . $type;
-            }
-            if ($lang !== null) {
-                $this->assertSafeLangTag($lang);
-                return '"' . $this->escapeString($val) . '"@' . $lang;
-            }
-            return '"' . $this->escapeString($val) . '"';
-        }
-        if ($key instanceof QualifiedName || $key instanceof Literal || is_scalar($key)) {
-            return $this->formatAttributeValue($key);
-        }
-        return '-';
+        return $this->formatAttributeValue($key);
     }
 
     /**

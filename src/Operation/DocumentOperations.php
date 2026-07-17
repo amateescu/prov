@@ -227,18 +227,14 @@ final class DocumentOperations
     }
 
     /**
-     * Remaps a dictionary entry key, preserving its declared value union. The
-     * `array` arm mirrors DictionaryEntry::$key's by-design broad shape (a raw
-     * PROV-JSON typed-literal map), which a native type cannot narrow.
+     * Remaps a dictionary entry key, preserving its declared value union.
      *
      * @param array<string, \Prov\Identifier\ProvNamespace> $byUri
-     *
-     * @mago-ignore analysis:imprecise-type
      */
     private static function remapDictKey(
-        QualifiedName|Literal|string|int|float|bool|array|null $key,
+        QualifiedName|Literal|string|int|float|bool|null $key,
         array $byUri,
-    ): QualifiedName|Literal|string|int|float|bool|array|null {
+    ): QualifiedName|Literal|string|int|float|bool|null {
         if ($key instanceof QualifiedName) {
             return self::remapQn($key, $byUri);
         }
