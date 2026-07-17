@@ -58,6 +58,9 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
     private ?PrefixMinter $minter = null;
 
+    /** @var ?list<string> Warnings collected during a lenient parse; null while a strict parse runs. */
+    private ?array $warnings = null;
+
     public function __construct(
         public readonly bool $prettyPrint = false,
         public readonly bool $sortRecords = false,
@@ -148,6 +151,67 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             // means the input is malformed; surface it under the
             // deserialization contract.
             throw new DeserializationException('Invalid PROV-JSON: ' . $e->getMessage(), previous: $e);
+        }
+    }
+
+    /**
+     * Parses PROV-JSON leniently: the readable records land in the returned
+     * Document, and each record skipped as malformed produces a warning rather
+     * than aborting the parse. Document-level damage (invalid JSON, a root that
+     * is not a map, a section or namespace map that is not a map) still throws,
+     * the same as `deserialize()`; leniency covers record-level damage only.
+     *
+     * @throws \Prov\Exception\DeserializationException
+     *   On document-level structural damage.
+     */
+    public function deserializeLenient(string $data): LenientDeserialization
+    {
+        $json = json_decode($data, true);
+        if (!is_array($json)) {
+            throw new DeserializationException('Invalid PROV-JSON: could not decode JSON.');
+        }
+
+        $this->warnings = [];
+        try {
+            $document = $this->deserializeDocument($json);
+            return new LenientDeserialization($document, $this->warnings ?? []);
+        } catch (NamespaceException|\InvalidArgumentException $e) {
+            throw new DeserializationException('Invalid PROV-JSON: ' . $e->getMessage(), previous: $e);
+        } finally {
+            $this->warnings = null;
+        }
+    }
+
+    /**
+     * Builds one PROV-JSON section entry into the record list. In strict mode
+     * (the default) the builder runs straight against `$records`, so a
+     * DeserializationException, or the NamespaceException / InvalidArgumentException
+     * that the deserialize paths map to one, propagates. In lenient mode the
+     * entry is built into a scratch list first: on failure its partial records
+     * are dropped, a warning naming the section, id, and reason is recorded, and
+     * parsing continues with the next entry.
+     *
+     * @param callable(): list<\Prov\Model\ProvRecord> $build
+     *   Builds and returns the entry's records.
+     * @param list<\Prov\Model\ProvRecord> $records
+     */
+    private function guardedAppend(string $section, string $id, callable $build, array &$records): void
+    {
+        if ($this->warnings === null) {
+            foreach ($build() as $record) {
+                $records[] = $record;
+            }
+            return;
+        }
+
+        try {
+            $built = $build();
+        } catch (DeserializationException|NamespaceException|\InvalidArgumentException $e) {
+            $this->warnings[] = "Skipped {$section} '{$id}': " . $e->getMessage();
+            return;
+        }
+        foreach ($built as $record) {
+            $records[] = $record;
         }
     }
 
@@ -644,69 +708,90 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     private function deserializeRecords(array $json, NamespaceManager $nsManager, array &$records): void
     {
         if (isset($json['entity'])) {
-            $emptyAttrs = Attributes::empty();
             foreach ($this->assertSection($json['entity'], 'entity') as $id => $attrs) {
                 $idStr = (string) $id;
-                $deserId = $this->resolveQName($idStr, $nsManager);
-                // Fast path: the overwhelmingly common "no attributes" case.
-                if ($attrs === [] || $attrs === null) {
-                    $records[] = new Entity($deserId, $emptyAttrs);
-                    continue;
-                }
-                foreach ($this->unpackScruffy($attrs) as $instance) {
-                    $instance = $this->assertRecordBody($instance, 'entity', $idStr);
-                    $records[] = new Entity(
-                        $deserId,
-                        $this->deserializeExtraAttributes($instance, $nsManager) ?? $emptyAttrs,
-                    );
-                }
+                $this->guardedAppend(
+                    'entity',
+                    $idStr,
+                    function () use ($idStr, $attrs, $nsManager): array {
+                        $deserId = $this->resolveQName($idStr, $nsManager);
+                        // Fast path: the overwhelmingly common "no attributes" case.
+                        if ($attrs === [] || $attrs === null) {
+                            return [new Entity($deserId, Attributes::empty())];
+                        }
+                        $built = [];
+                        foreach ($this->unpackScruffy($attrs) as $instance) {
+                            $instance = $this->assertRecordBody($instance, 'entity', $idStr);
+                            $built[] = new Entity(
+                                $deserId,
+                                $this->deserializeExtraAttributes($instance, $nsManager) ?? Attributes::empty(),
+                            );
+                        }
+                        return $built;
+                    },
+                    $records,
+                );
             }
         }
 
         if (isset($json['activity'])) {
-            $emptyAttrs = Attributes::empty();
             foreach ($this->assertSection($json['activity'], 'activity') as $id => $attrs) {
                 $idStr = (string) $id;
-                $deserId = $this->resolveQName($idStr, $nsManager);
-                if ($attrs === [] || $attrs === null) {
-                    $records[] = new Activity($deserId, null, null, $emptyAttrs);
-                    continue;
-                }
-                foreach ($this->unpackScruffy($attrs) as $instance) {
-                    $instance = $this->assertRecordBody($instance, 'activity', $idStr);
-                    $startTime = isset($instance['prov:startTime'])
-                        ? $this->parseDateTime($instance['prov:startTime'])
-                        : null;
-                    $endTime = isset($instance['prov:endTime'])
-                        ? $this->parseDateTime($instance['prov:endTime'])
-                        : null;
-                    unset($instance['prov:startTime'], $instance['prov:endTime']);
-                    $records[] = new Activity(
-                        $deserId,
-                        $startTime,
-                        $endTime,
-                        $this->deserializeExtraAttributes($instance, $nsManager) ?? $emptyAttrs,
-                    );
-                }
+                $this->guardedAppend(
+                    'activity',
+                    $idStr,
+                    function () use ($idStr, $attrs, $nsManager): array {
+                        $deserId = $this->resolveQName($idStr, $nsManager);
+                        if ($attrs === [] || $attrs === null) {
+                            return [new Activity($deserId, null, null, Attributes::empty())];
+                        }
+                        $built = [];
+                        foreach ($this->unpackScruffy($attrs) as $instance) {
+                            $instance = $this->assertRecordBody($instance, 'activity', $idStr);
+                            $startTime = isset($instance['prov:startTime'])
+                                ? $this->parseDateTime($instance['prov:startTime'])
+                                : null;
+                            $endTime = isset($instance['prov:endTime'])
+                                ? $this->parseDateTime($instance['prov:endTime'])
+                                : null;
+                            unset($instance['prov:startTime'], $instance['prov:endTime']);
+                            $built[] = new Activity(
+                                $deserId,
+                                $startTime,
+                                $endTime,
+                                $this->deserializeExtraAttributes($instance, $nsManager) ?? Attributes::empty(),
+                            );
+                        }
+                        return $built;
+                    },
+                    $records,
+                );
             }
         }
 
         if (isset($json['agent'])) {
-            $emptyAttrs = Attributes::empty();
             foreach ($this->assertSection($json['agent'], 'agent') as $id => $attrs) {
                 $idStr = (string) $id;
-                $deserId = $this->resolveQName($idStr, $nsManager);
-                if ($attrs === [] || $attrs === null) {
-                    $records[] = new Agent($deserId, $emptyAttrs);
-                    continue;
-                }
-                foreach ($this->unpackScruffy($attrs) as $instance) {
-                    $instance = $this->assertRecordBody($instance, 'agent', $idStr);
-                    $records[] = new Agent(
-                        $deserId,
-                        $this->deserializeExtraAttributes($instance, $nsManager) ?? $emptyAttrs,
-                    );
-                }
+                $this->guardedAppend(
+                    'agent',
+                    $idStr,
+                    function () use ($idStr, $attrs, $nsManager): array {
+                        $deserId = $this->resolveQName($idStr, $nsManager);
+                        if ($attrs === [] || $attrs === null) {
+                            return [new Agent($deserId, Attributes::empty())];
+                        }
+                        $built = [];
+                        foreach ($this->unpackScruffy($attrs) as $instance) {
+                            $instance = $this->assertRecordBody($instance, 'agent', $idStr);
+                            $built[] = new Agent(
+                                $deserId,
+                                $this->deserializeExtraAttributes($instance, $nsManager) ?? Attributes::empty(),
+                            );
+                        }
+                        return $built;
+                    },
+                    $records,
+                );
             }
         }
 
@@ -751,24 +836,34 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             $formalAttrs = RelationMetadata::jsonFormalKeys($jsonKey);
 
             foreach ($this->assertSection($json[$jsonKey], $jsonKey) as $id => $attrs) {
-                // Scruffy provenance: an ID can map to an array of instances.
-                if (is_array($attrs) && array_is_list($attrs)) {
-                    foreach ($attrs as $instance) {
-                        $instance = $this->assertRecordBody($instance, $jsonKey, (string) $id);
-                        $this->deserializeSingleRelation(
-                            $jsonKey,
-                            (string) $id,
-                            $instance,
-                            $formalAttrs,
-                            $nsManager,
-                            $records,
-                        );
-                    }
-                    continue;
-                }
+                $idStr = (string) $id;
+                $this->guardedAppend(
+                    $jsonKey,
+                    $idStr,
+                    function () use ($jsonKey, $idStr, $attrs, $formalAttrs, $nsManager): array {
+                        $built = [];
+                        // Scruffy provenance: an ID can map to an array of instances.
+                        if (is_array($attrs) && array_is_list($attrs)) {
+                            foreach ($attrs as $instance) {
+                                $instance = $this->assertRecordBody($instance, $jsonKey, $idStr);
+                                $this->deserializeSingleRelation(
+                                    $jsonKey,
+                                    $idStr,
+                                    $instance,
+                                    $formalAttrs,
+                                    $nsManager,
+                                    $built,
+                                );
+                            }
+                            return $built;
+                        }
 
-                $attrs = $this->assertRecordBody($attrs, $jsonKey, (string) $id);
-                $this->deserializeSingleRelation($jsonKey, (string) $id, $attrs, $formalAttrs, $nsManager, $records);
+                        $body = $this->assertRecordBody($attrs, $jsonKey, $idStr);
+                        $this->deserializeSingleRelation($jsonKey, $idStr, $body, $formalAttrs, $nsManager, $built);
+                        return $built;
+                    },
+                    $records,
+                );
             }
         }
     }
