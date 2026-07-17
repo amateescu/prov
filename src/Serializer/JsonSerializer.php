@@ -427,13 +427,12 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
         // "Complex" keys need the array-of-objects format because the simple-map
         // format can only hold string-stringifiable keys with a shared datatype.
-        // Literals with a lang tag, QualifiedName-typed keys, and raw array values
-        // from an untyped deserialization path all fall here.
+        // Literals with a lang tag and QualifiedName-typed keys both fall here.
         $hasComplexKeys = false;
         $seenDatatype = null;
         foreach ($pairs as $pair) {
             $k = $pair->key;
-            if (is_array($k) || $k instanceof QualifiedName || $k instanceof Literal && $k->languageTag !== null) {
+            if ($k instanceof QualifiedName || $k instanceof Literal && $k->languageTag !== null) {
                 $hasComplexKeys = true;
                 break;
             }
@@ -451,9 +450,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             foreach ($pairs as $pair) {
                 $entry = ['$' => $pair->entity !== null ? $this->jsonQName($pair->entity) : null];
                 $k = $pair->key;
-                if (is_array($k)) {
-                    $entry['key'] = $k;
-                } elseif ($k instanceof QualifiedName) {
+                if ($k instanceof QualifiedName) {
                     $entry['key'] = ['$' => $this->jsonQName($k), 'type' => 'prov:QUALIFIED_NAME'];
                 } elseif ($k instanceof Literal) {
                     $entry['key'] = $this->serializeAttributeValue($k);
@@ -494,7 +491,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             } elseif ($k instanceof \Stringable) {
                 $stringKey = (string) $k;
             } else {
-                // Array/null keys shouldn't reach here for valid PROV-JSON output;
+                // A null key shouldn't reach here for valid PROV-JSON output;
                 // skip rather than corrupt the output.
                 continue;
             }
@@ -509,19 +506,14 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
      * the list of keys removed from the input dictionary.
      *
      * @param array<string, mixed> $attrs
-     * @param list<mixed> $keys
+     * @param list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool> $keys
      */
     private function addDictKeySet(array &$attrs, array $keys): null
     {
         if ($keys !== []) {
             $set = [];
             foreach ($keys as $key) {
-                if (is_array($key)) {
-                    // Raw JSON value from deserialization, pass through.
-                    $set[] = $key;
-                } else {
-                    $set[] = $this->serializeAttributeValue($key);
-                }
+                $set[] = $this->serializeAttributeValue($key);
             }
             $attrs['prov:key-set'] = $set;
         }
@@ -978,7 +970,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     /**
      * @param list<mixed>|mixed $keys
      *
-     * @return list<mixed>
+     * @return list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool>
      */
     private function deserializeKeySet(mixed $keys, NamespaceManager $nsManager): array
     {
@@ -987,10 +979,14 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         }
         $out = [];
         foreach ($keys as $key) {
-            if (is_array($key) && isset($key['$'])) {
+            if (is_array($key)) {
                 $out[] = $this->deserializeTypedValue($key, $nsManager);
-            } else {
+            } elseif (is_scalar($key)) {
                 $out[] = $key;
+            } else {
+                throw new DeserializationException(
+                    'Invalid PROV-JSON: a prov:key-set entry must be a scalar or a typed-literal object.',
+                );
             }
         }
         return $out;
@@ -1040,9 +1036,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             foreach ($set as $entry) {
                 if (is_array($entry) && isset($entry['$'])) {
                     $rawKey = $entry['key'] ?? null;
-                    $key = is_array($rawKey) && isset($rawKey['$'])
-                        ? $this->deserializeTypedValue($rawKey, $nsManager)
-                        : $rawKey;
+                    $key = is_array($rawKey) ? $this->deserializeTypedValue($rawKey, $nsManager) : $rawKey;
                     $entity = is_string($entry['$']) ? $this->resolveQName($entry['$'], $nsManager) : null;
                     $pairs[] = new DictionaryEntry($key, $entity);
                 }

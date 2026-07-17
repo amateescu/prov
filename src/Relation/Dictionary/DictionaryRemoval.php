@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Prov\Relation\Dictionary;
 
 use Prov\Attribute\Attributes;
+use Prov\Attribute\Literal;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\ProvRelation;
 
@@ -15,7 +16,7 @@ use Prov\Model\ProvRelation;
 readonly class DictionaryRemoval extends ProvRelation
 {
     /**
-     * @param list<mixed> $removedKeys
+     * @param list<QualifiedName|Literal|string|int|float|bool> $removedKeys
      */
     public function __construct(
         ?QualifiedName $identifier,

@@ -713,7 +713,7 @@ abstract class RecordBuilder
      *   The resulting dictionary (after removal).
      * @param \Prov\Identifier\QualifiedName|string $before
      *   The source dictionary (before removal).
-     * @param list<mixed> $removedKeys
+     * @param list<QualifiedName|Literal|string|int|float|bool> $removedKeys
      */
     public function derivedByRemovalFrom(
         QualifiedName|string $after,

@@ -757,7 +757,8 @@ class ProvNDeserializer implements ProvDeserializerInterface
 
     /**
      * Parse {key, key, ...}
-     * @return list<mixed>
+     *
+     * @return list<QualifiedName|Literal|string|int|float|bool>
      */
     private function parseKeySet(NamespaceManager $nsManager): array
     {
