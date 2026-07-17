@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Prov\Serializer;
 
+use Prov\Identifier\NamespaceManager;
+use Prov\Identifier\QualifiedName;
+
 /**
  * Encodes and decodes the PROV grammar's `PN_CHARS_ESC` backslash escapes, which
  * let a qualified-name local part carry delimiter punctuation (`( ) [ ] ' = , ; : .`).
@@ -70,6 +73,31 @@ final class QualifiedNameEscaper
             $out .= $escape ? '\\' . $c : $c;
         }
         return $out;
+    }
+
+    /**
+     * Resolves a serialized `prefix:local` string and decodes the escapes in the
+     * local part, so a name read back from a format that escapes matches the
+     * same name read from one that does not. Every read side that resolves a
+     * document-side name (the PROV-JSON deserializer, the scanner) goes through
+     * this, so they report identical identifiers for identical input.
+     *
+     * @throws \Prov\Exception\NamespaceException
+     *   When the identifier does not resolve against the given namespaces.
+     */
+    public static function resolveDecoded(string $raw, NamespaceManager $nsManager): QualifiedName
+    {
+        $qn = $nsManager->resolve($raw);
+        // An escape can only be present if the raw string carried a backslash;
+        // skip the decode pass (and its allocation) for the common bare name.
+        if (!str_contains($raw, '\\')) {
+            return $qn;
+        }
+        $decoded = self::decode($qn->localPart);
+        if ($decoded === $qn->localPart) {
+            return $qn;
+        }
+        return new QualifiedName($qn->namespace, $decoded);
     }
 
     /**

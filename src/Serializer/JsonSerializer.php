@@ -689,17 +689,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
      */
     private function resolveQName(string $raw, NamespaceManager $nsManager): QualifiedName
     {
-        $qn = $nsManager->resolve($raw);
-        // An escape can only be present if the raw string carried a backslash;
-        // skip the decode pass (and its allocation) for the common bare name.
-        if (!str_contains($raw, '\\')) {
-            return $qn;
-        }
-        $decoded = QualifiedNameEscaper::decode($qn->localPart);
-        if ($decoded === $qn->localPart) {
-            return $qn;
-        }
-        return new QualifiedName($qn->namespace, $decoded);
+        return QualifiedNameEscaper::resolveDecoded($raw, $nsManager);
     }
 
     /**
@@ -1250,10 +1240,11 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             throw new DeserializationException('Invalid PROV-JSON: typed value "type" must be a string.');
         }
 
-        // prov:QUALIFIED_NAME is the PROV-JSON-native tag for a QualifiedName
-        // value; xsd:QName is the PROV-XML equivalent some JSON fixtures emit.
-        // These two standard spellings are matched by their literal token, so
-        // the common case skips resolving the type.
+        // prov:QUALIFIED_NAME is the QualifiedName tag emitted by ProvToolbox
+        // and python-prov, so it's what most PROV-JSON in the wild uses; xsd:QName
+        // is the spelling in the 2013 W3C PROV-JSON submission examples. Both are
+        // matched by their literal token, so the common case skips resolving the
+        // type.
         if ($type === 'prov:QUALIFIED_NAME' || $type === 'xsd:QName') {
             return $this->resolveQName($lexical, $nsManager);
         }

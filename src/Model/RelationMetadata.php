@@ -380,6 +380,32 @@ final class RelationMetadata
     }
 
     /**
+     * TYPING_ROLES re-keyed by PROV-JSON relation key instead of relation
+     * class, so a reader working off decoded PROV-JSON (which knows the
+     * section name, not the relation class) can classify an endpoint without
+     * its own class lookup. A key TYPING_ROLES does not classify (an event
+     * reference, a bundle reference, the polymorphic influencee/influencer of
+     * Influence) is absent, the same as looking it up on TYPING_ROLES
+     * directly. Built once and cached.
+     *
+     * @return array<string, 'entity'|'activity'|'agent'>
+     *   Formal property name (unprefixed, matching TYPING_ROLES itself) =>
+     *   kind.
+     */
+    public static function jsonTypingRoles(string $jsonKey): array
+    {
+        /** @var array<string, array<string, 'entity'|'activity'|'agent'>>|null $map */
+        static $map = null;
+        if ($map === null) {
+            $map = [];
+            foreach (self::JSON_KEYS as $class => $section) {
+                $map[$section] = self::TYPING_ROLES[$class] ?? [];
+            }
+        }
+        return $map[$jsonKey] ?? [];
+    }
+
+    /**
      * The PROV-N keyword for a relation, e.g. `wasGeneratedBy`, `used`,
      * `specializationOf`. A Derivation carrying a `prov:type` of `prov:Revision`,
      * `prov:Quotation`, or `prov:PrimarySource` reports the subtype shortcut
