@@ -29,12 +29,21 @@ class DocumentBuilder extends RecordBuilder
     private array $bundleBuilders = [];
 
     /**
-     * @param iterable<\Prov\Identifier\ProvNamespace> $namespaces
-     *   Namespaces to register up front, equivalent to calling
-     *   `addNamespaces()` immediately after construction.
+     * @param \Prov\Identifier\NamespaceManager|iterable<\Prov\Identifier\ProvNamespace> $namespaces
+     *   A shared NamespaceManager to build against, or namespaces to register up
+     *   front in a fresh manager (equivalent to calling `addNamespaces()` right
+     *   after construction). A passed manager is used directly, not copied: the
+     *   caller owns its lifetime, and any namespace this build declares (a
+     *   `namespace()` call, a prefix minted while resolving) stays in that shared
+     *   manager, so a later builder over the same manager reuses it. Pass an
+     *   iterable when each document should start from its own registry.
      */
-    public function __construct(iterable $namespaces = [])
+    public function __construct(NamespaceManager|iterable $namespaces = [])
     {
+        if ($namespaces instanceof NamespaceManager) {
+            $this->namespaceManager = $namespaces;
+            return;
+        }
         $this->namespaceManager = new NamespaceManager();
         $this->addNamespaces($namespaces);
     }

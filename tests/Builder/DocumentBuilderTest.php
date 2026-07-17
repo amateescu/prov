@@ -11,6 +11,7 @@ use Prov\Attribute\Literal;
 use Prov\Builder\DocumentBuilder;
 use Prov\Document;
 use Prov\Exception\NamespaceException;
+use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\ProvNamespace;
 use Prov\Relation\Alternate;
 use Prov\Relation\Association;
@@ -507,6 +508,38 @@ final class DocumentBuilderTest extends TestCase
 
         $doc = $builder->build();
         $this->assertSame('http://example.org/myEntity', $doc->entities[0]->identifier->uri);
+    }
+
+    public function testSharedNamespaceManagerIsUsedDirectly(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->add($this->ex);
+
+        $builder = new DocumentBuilder($manager);
+
+        $this->assertSame($manager, $builder->getNamespaceManager());
+        $doc = $builder->entity('ex:e1')->build();
+        $this->assertSame('http://example.org/e1', $doc->entities[0]->identifier->uri);
+    }
+
+    public function testSharedNamespaceManagerCarriesDeclarationsAcrossBuilds(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->add($this->ex);
+
+        // A namespace declared while the first builder runs stays in the shared
+        // manager instead of being thrown away with the builder.
+        new DocumentBuilder($manager)
+            ->namespace('foo', 'http://foo.example/')
+            ->entity('foo:e1')
+            ->build();
+
+        // A second builder over the same manager resolves 'foo:' with no redeclaration.
+        $doc = new DocumentBuilder($manager)
+            ->entity('foo:e2')
+            ->build();
+
+        $this->assertSame('http://foo.example/e2', $doc->entities[0]->identifier->uri);
     }
 
     public function testGetNamespaceManagerReflectsRegisteredNamespaces(): void
