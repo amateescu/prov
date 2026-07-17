@@ -137,6 +137,52 @@ final class AttributesBuilderTest extends TestCase
         $this->assertSame($qn, $attrs->firstValue($this->ex->qualifiedName('b')));
     }
 
+    public function testBuildCollapsesEqualValuesUnderOneKey(): void
+    {
+        // build() hands the entries to Attributes, which keeps a key's values a
+        // set, so repeats through add() and addAll() collapse into the first one.
+        $attrs = new AttributesBuilder($this->nsManager)
+            ->add('ex:tag', 'a')
+            ->add('ex:tag', 'a')
+            ->addAll('ex:tag', ['a', 'b', 'b', 42])
+            ->build();
+
+        $this->assertSame(['a', 'b', 42], $attrs->get($this->ex->qualifiedName('tag')));
+    }
+
+    public function testBuildCollapsesQualifiedNamesByUri(): void
+    {
+        // Two QualifiedName instances with the same URI but different prefixes
+        // name the same thing, so only the first is kept.
+        $ex2 = new ProvNamespace('ex2', 'http://example.org/');
+        $first = $this->ex->qualifiedName('thing');
+        $second = $ex2->qualifiedName('thing');
+
+        $attrs = new AttributesBuilder($this->nsManager)
+            ->add('ex:ref', $first)
+            ->add('ex:ref', $second)
+            ->build();
+
+        $values = $attrs->get($this->ex->qualifiedName('ref'));
+        $this->assertCount(1, $values);
+        $this->assertSame($first, $values[0]);
+    }
+
+    public function testBuildCollapsesResolvedProvTypeValues(): void
+    {
+        // A prov:type string shorthand resolves to a QualifiedName as it is
+        // added, so the shorthand and the equal QualifiedName collapse.
+        $attrs = new AttributesBuilder($this->nsManager)
+            ->add('prov:type', 'ex:Document')
+            ->add('prov:type', $this->ex->qualifiedName('Document'))
+            ->build();
+
+        $values = $attrs->get($this->nsManager->resolve('prov:type'));
+        $this->assertCount(1, $values);
+        $this->assertInstanceOf(QualifiedName::class, $values[0]);
+        $this->assertSame('http://example.org/Document', $values[0]->getUri());
+    }
+
     public function testBuilderStaysUsableAfterBuild(): void
     {
         $builder = new AttributesBuilder($this->nsManager)->add('ex:tag', 'a');

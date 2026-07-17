@@ -12,10 +12,13 @@ use Prov\Identifier\QualifiedName;
  * Imperative accumulator for building an Attributes bag.
  *
  * Complements the immutable Attributes API: call `add()` repeatedly (also
- * with the same key, since attributes are a multimap) and freeze the result
- * with `build()`. When constructed with a NamespaceManager, string keys are
- * resolved as QualifiedName shorthands (see NamespaceManager::resolve());
- * without one, keys must be QualifiedName objects.
+ * with the same key, since attributes accumulate as a multimap) and freeze the
+ * result with `build()`. PROV-DM models a record's attributes as a set of
+ * attribute-value pairs, so `build()` collapses values that repeat under a key;
+ * adding the same value twice is harmless. When constructed with a
+ * NamespaceManager, string keys are resolved as QualifiedName shorthands
+ * (see NamespaceManager::resolve()); without one, keys must be QualifiedName
+ * objects.
  *
  * String values stay plain string literals, with one exception: a
  * `prov:type` value written as a registered `prefix:local` shorthand (or as
@@ -45,15 +48,17 @@ final class AttributesBuilder
 
     /**
      * Appends one value under the given key. Repeated calls with the same key
-     * accumulate multiple values.
+     * accumulate multiple values; values that denote the same thing collapse
+     * into the first of them at `build()` time, by the canonical identity in
+     * `\Prov\Attribute\ValueIdentity`.
      */
     public function add(QualifiedName|string $key, QualifiedName|Literal|string|int|float|bool $value): static
     {
         $key = $this->resolveKey($key);
-        $uri = $key->getUri();
-        if ($uri === self::PROV_TYPE_URI && is_string($value)) {
+        if ($key->getUri() === self::PROV_TYPE_URI && is_string($value)) {
             $value = $this->resolveTypeValue($value);
         }
+        $uri = $key->getUri();
         $this->data[$uri][] = $value;
         $this->keys[$uri] ??= $key;
         return $this;

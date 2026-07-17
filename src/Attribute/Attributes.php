@@ -104,6 +104,8 @@ readonly class Attributes implements \Countable, \IteratorAggregate
 
     /**
      * Returns a new Attributes instance with the given key-value pair added.
+     * A pair equal to one already in the bag collapses, since the constructor
+     * enforces the set semantics for every construction path.
      */
     public function with(QualifiedName $key, QualifiedName|Literal|string|int|float|bool $value): self
     {
