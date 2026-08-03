@@ -302,10 +302,12 @@ final class ProvGraph
         // namespace URIs, so an in-graph URN still maps to its index key. An
         // unresolvable reference cannot name anything in the index, so it is
         // used as-is and the lookup misses, mirroring how an unknown
-        // authority-form URI behaves above.
+        // authority-form URI behaves above. The InvalidArgumentException arm
+        // keeps that promise even if a namespace rejects a local part resolve()
+        // let through.
         try {
             return $this->nsManager->resolve($identifier)->getUri();
-        } catch (NamespaceException) {
+        } catch (NamespaceException|\InvalidArgumentException) {
             return $identifier;
         }
     }

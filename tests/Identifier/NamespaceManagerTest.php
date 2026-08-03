@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Prov\Tests\Identifier;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Prov\Exception\NamespaceException;
 use Prov\Identifier\NamespaceManager;
@@ -104,6 +105,33 @@ final class NamespaceManagerTest extends TestCase
         $this->assertSame('http://www.w3.org/ns/prov#Entity', $qn->uri);
     }
 
+    /**
+     * @return array<string, list<string>>
+     */
+    public static function emptyLocalPartProvider(): array
+    {
+        return [
+            'registered prefix' => ['prov:'],
+            'blank-node sentinel' => ['_:'],
+            'bare default-namespace name' => [''],
+        ];
+    }
+
+    /**
+     * Every way resolve() can fail reports a NamespaceException, including the
+     * empty local parts, which is the type callers that tolerate unresolvable
+     * identifiers catch.
+     */
+    #[DataProvider('emptyLocalPartProvider')]
+    public function testResolveEmptyLocalPartThrowsNamespaceException(string $shorthand): void
+    {
+        $manager = new NamespaceManager();
+        $manager->setDefault(new ProvNamespace('default', 'http://default.org/'));
+
+        $this->expectException(NamespaceException::class);
+        $manager->resolve($shorthand);
+    }
+
     public function testParentChaining(): void
     {
         $parent = new NamespaceManager();
@@ -191,6 +219,40 @@ final class NamespaceManagerTest extends TestCase
         $manager->setDefault($default);
 
         $this->assertSame($default, $manager->getNamespace('myns'));
+    }
+
+    public function testSetDefaultToAnAlreadyRegisteredNamespaceRefreshesResolutions(): void
+    {
+        $manager = new NamespaceManager();
+        $a = new ProvNamespace('a', 'http://a.org/');
+        $b = new ProvNamespace('b', 'http://b.org/');
+
+        $manager->setDefault($a);
+        $this->assertSame('http://a.org/foo', $manager->resolve('foo')->uri);
+
+        // add() registers b, then setDefault(b) finds it already registered. The
+        // unprefixed name still has to follow the new default, cached or not.
+        $manager->add($b);
+        $this->assertSame('http://a.org/foo', $manager->resolve('foo')->uri);
+        $manager->setDefault($b);
+        $this->assertSame('http://b.org/foo', $manager->resolve('foo')->uri);
+    }
+
+    public function testRejectedSetDefaultKeepsThePreviousDefault(): void
+    {
+        $manager = new NamespaceManager();
+        $manager->setDefault(new ProvNamespace('ex', 'http://example.org/'));
+
+        try {
+            $manager->setDefault(new ProvNamespace('ex', 'http://other.org/'));
+            $this->fail('Expected a NamespaceException for the conflicting rebinding.');
+        } catch (NamespaceException $e) {
+            $this->assertStringContainsString("Prefix 'ex' is already registered", $e->getMessage());
+        }
+
+        // The declaration was rejected, so it must not take effect either.
+        $this->assertSame('http://example.org/', $manager->getNamespace('ex')->uri);
+        $this->assertSame('http://example.org/foo', $manager->resolve('foo')->uri);
     }
 
     public function testResolveMultipleColonsSplitsOnFirst(): void

@@ -145,11 +145,24 @@ class NamespaceManager
     /**
      * Declares the default namespace used to expand unprefixed identifiers.
      * Also registers the namespace so its prefix is available.
+     *
+     * Registration runs first, so a prefix conflict leaves the previous default
+     * in place instead of pointing at a namespace that was never registered.
+     *
+     * @throws \Prov\Exception\NamespaceException
+     *   When the prefix is already bound to a different URI.
      */
     public function setDefault(ProvNamespace $ns): void
     {
-        $this->default = $ns;
+        $previous = $this->default;
         $this->add($ns);
+        $this->default = $ns;
+        // resolve() caches unprefixed names against the default namespace, and
+        // add() clears the caches only when it registers a new binding. A new
+        // default URI has to clear them here.
+        if ($previous === null || $previous->uri !== $ns->uri) {
+            $this->invalidateCaches();
+        }
     }
 
     /**
@@ -159,7 +172,8 @@ class NamespaceManager
      *  - Unprefixed: "foo" (requires a default namespace)
      *
      * @throws \Prov\Exception\NamespaceException
-     *   If the prefix is not registered or no default namespace is set.
+     *   If the prefix is not registered, no default namespace is set, or the
+     *   local part is empty.
      */
     public function resolve(string $shorthand): QualifiedName
     {
@@ -167,14 +181,22 @@ class NamespaceManager
             return $this->resolveCache[$shorthand];
         }
 
+        // A qualified name needs a local part. Catching the empty ones here keeps
+        // every failure of this method a NamespaceException, which is what the
+        // callers that tolerate unresolvable identifiers catch.
+        if ($shorthand === '') {
+            throw new NamespaceException('Cannot resolve an empty identifier.');
+        }
+
         // Blank-node sentinel (e.g. "_:b1"): an anonymous record identifier, not a
         // prefixed name to resolve against a namespace. Mirrors RecordBuilder::blank()
         // so a blank node round-trips back to the same QualifiedName it serialized from.
         if (str_starts_with($shorthand, '_:')) {
-            return $this->resolveCache[$shorthand] = new QualifiedName(
-                new ProvNamespace('_', '_:'),
-                substr($shorthand, 2),
-            );
+            $label = substr($shorthand, 2);
+            if ($label === '') {
+                throw new NamespaceException("Identifier '{$shorthand}' has an empty local part.");
+            }
+            return $this->resolveCache[$shorthand] = new QualifiedName(new ProvNamespace('_', '_:'), $label);
         }
 
         // Try the full-URI path only if the input actually looks like one.
@@ -194,6 +216,9 @@ class NamespaceManager
             [$prefix, $localPart] = explode(':', $shorthand, 2);
             $ns = $this->getNamespace($prefix);
             if ($ns !== null) {
+                if ($localPart === '') {
+                    throw new NamespaceException("Identifier '{$shorthand}' has an empty local part.");
+                }
                 return $this->resolveCache[$shorthand] = $ns->qualifiedName($localPart);
             }
             // The leading segment is not a registered prefix, so the input may

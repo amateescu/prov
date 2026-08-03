@@ -165,6 +165,17 @@ final class ProvGraphTest extends TestCase
         $this->assertSame([], $graph->relationsFrom('nope:article'));
         $this->assertNull($graph->recordByIdentifier('urn:uuid:00000000-0000-0000-0000-000000000000#node/1'));
         $this->assertNull($graph->recordByIdentifier('http://unknown.example/article'));
+
+        // A declared prefix with no local part names nothing either.
+        $this->assertNull($graph->recordByIdentifier('prov:'));
+        $this->assertSame([], $graph->relationsReferencing('prov:'));
+
+        // Neither does the bare name under a declared default namespace.
+        $builder = new DocumentBuilder();
+        $builder->namespace('default', 'http://default.org/');
+        $builder->entity('article');
+        $withDefault = new ProvGraph($builder->build());
+        $this->assertNull($withDefault->recordByIdentifier(''));
     }
 
     public function testBlankNodeEndpoints(): void
