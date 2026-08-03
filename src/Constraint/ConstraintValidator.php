@@ -759,18 +759,7 @@ class ConstraintValidator
      */
     private function checkConstraint39(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        $checked = [];
-        foreach ($index->getEntities() as $record) {
-            $identifier = $record->identifier;
-            if ($identifier === null) {
-                continue;
-            }
-            $uri = $identifier->getUri();
-            if (isset($checked[$uri])) {
-                continue;
-            }
-            $checked[$uri] = true;
-
+        foreach ($index->getEntityUrisWithEvents() as $uri) {
             // Deduplicate by generation ID (scruffy duplicates share an ID).
             // Key times by "U.u" (Unix timestamp + microseconds) for timezone-independent
             // value comparison; two DateTimeImmutable instances for the same instant
@@ -805,18 +794,7 @@ class ConstraintValidator
      */
     private function checkConstraint40(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        $checked = [];
-        foreach ($index->getEntities() as $record) {
-            $identifier = $record->identifier;
-            if ($identifier === null) {
-                continue;
-            }
-            $uri = $identifier->getUri();
-            if (isset($checked[$uri])) {
-                continue;
-            }
-            $checked[$uri] = true;
-
+        foreach ($index->getEntityUrisWithEvents() as $uri) {
             $timesByInvId = [];
             foreach ($index->getInvalidationsForEntity($uri) as $inv) {
                 if ($inv->time === null) {

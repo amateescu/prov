@@ -18,8 +18,8 @@ use Prov\Model\RelationMetadata;
  * Semantic equality comparison for Documents and Bundles.
  *
  * Compares records by type, identifier URI, formal attributes, and extra attributes.
- * Ignores blank node identifiers, record ordering, namespace prefix names, and
- * attribute key ordering.
+ * Ignores blank node identifiers, record ordering, namespace prefix names,
+ * attribute key ordering, and the UTC offset formal times are written in.
  *
  * Blank-node references are compared up to renaming: each blank label is replaced
  * by a canonical label derived from the records it occurs in (iteratively refined,
@@ -280,8 +280,8 @@ final class DocumentComparator
     {
         if ($record instanceof Activity) {
             return [
-                $record->startTime !== null ? Literal::formatDateTime($record->startTime) : '',
-                $record->endTime !== null ? Literal::formatDateTime($record->endTime) : '',
+                $record->startTime !== null ? self::dateTimeSignature($record->startTime) : '',
+                $record->endTime !== null ? self::dateTimeSignature($record->endTime) : '',
             ];
         }
 
@@ -312,7 +312,7 @@ final class DocumentComparator
             if ($value instanceof QualifiedName) {
                 $parts[] = self::referenceUri($value, $blankLabels);
             } elseif ($value instanceof \DateTimeImmutable) {
-                $parts[] = Literal::formatDateTime($value);
+                $parts[] = self::dateTimeSignature($value);
             } elseif (is_array($value) && $prop === 'keyEntityPairs') {
                 /** @var list<\Prov\Relation\Dictionary\DictionaryEntry> $value */
                 $parts[] = self::keyEntityPairsSignature($value, $blankLabels);
@@ -325,6 +325,20 @@ final class DocumentComparator
         }
 
         return $parts;
+    }
+
+    /**
+     * Signs a formal time by the instant it denotes, not by its lexical form.
+     * In the xsd:dateTime value space two times for the same instant are equal
+     * whatever UTC offset they are written in, so sign by "U.u" (Unix timestamp
+     * plus microseconds), the offset-independent key the constraint validator
+     * compares event times with too. Serializers keep using
+     * Literal::formatDateTime(), so output still carries the offset the caller
+     * supplied.
+     */
+    private static function dateTimeSignature(\DateTimeImmutable $value): string
+    {
+        return $value->format('U.u');
     }
 
     /**

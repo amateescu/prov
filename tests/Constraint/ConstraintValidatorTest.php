@@ -373,8 +373,11 @@ final class ConstraintValidatorTest extends TestCase
         $b->entity('ex:e1');
         $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
         $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a2', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        // ex:e2 is never declared, but its generation events still count.
+        $b->wasGeneratedBy(entity: 'ex:e2', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->wasGeneratedBy(entity: 'ex:e2', activity: 'ex:a2', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
         $v = $this->validate($b);
-        $this->assertCount(1, $v->getViolationsByConstraint(39));
+        $this->assertCount(2, $v->getViolationsByConstraint(39));
     }
 
     public function testConstraint39MultipleGenerationsSameTimeDifferentInstancesIsValid(): void
@@ -395,8 +398,11 @@ final class ConstraintValidatorTest extends TestCase
         $b->entity('ex:e1');
         $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
         $b->wasInvalidatedBy(entity: 'ex:e1', activity: 'ex:a2', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
+        // ex:e2 is never declared, but its invalidation events still count.
+        $b->wasInvalidatedBy(entity: 'ex:e2', activity: 'ex:a1', time: new \DateTimeImmutable('2023-01-01T00:00:00Z'));
+        $b->wasInvalidatedBy(entity: 'ex:e2', activity: 'ex:a2', time: new \DateTimeImmutable('2023-12-31T00:00:00Z'));
         $v = $this->validate($b);
-        $this->assertCount(1, $v->getViolationsByConstraint(40));
+        $this->assertCount(2, $v->getViolationsByConstraint(40));
     }
 
     public function testConstraint40MultipleInvalidationsSameTimeDifferentInstancesIsValid(): void

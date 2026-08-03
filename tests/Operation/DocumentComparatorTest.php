@@ -77,6 +77,29 @@ final class DocumentComparatorTest extends TestCase
         $this->assertTrue(DocumentComparator::equals($build(), $build()));
     }
 
+    public function testSameInstantInDifferentOffsetsIsEqual(): void
+    {
+        $build = function (string $start, string $generated) {
+            $b = $this->buildDoc();
+            $b->activity('ex:a1', new \DateTimeImmutable($start));
+            $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable($generated));
+            return $b->build();
+        };
+
+        // Activity times and relation time formals sign by instant, so the same
+        // moment written in two UTC offsets compares equal.
+        $this->assertTrue(DocumentComparator::equals(
+            $build('2026-01-01T12:00:00+00:00', '2026-01-01T13:30:00.500000+00:00'),
+            $build('2026-01-01T14:00:00+02:00', '2026-01-01T15:30:00.500000+02:00'),
+        ));
+
+        // Same lexical clock reading in two offsets is two different instants.
+        $this->assertFalse(DocumentComparator::equals(
+            $build('2026-01-01T12:00:00+00:00', '2026-01-01T13:30:00.500000+00:00'),
+            $build('2026-01-01T12:00:00+02:00', '2026-01-01T13:30:00.500000+02:00'),
+        ));
+    }
+
     public function testDifferentRecordOrderIsEqual(): void
     {
         $a = $this->buildDoc();

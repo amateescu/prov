@@ -51,9 +51,6 @@ class RecordIndex
     /** @var array<string, \Prov\Activity> URI -> \Prov\Activity */
     private array $activities = [];
 
-    /** @var list<\Prov\Entity> */
-    private array $entityRecords = [];
-
     /** @var list<\Prov\Activity> */
     private array $activityRecords = [];
 
@@ -125,9 +122,7 @@ class RecordIndex
                 $this->eventTypes[$id][] = $record::class;
             }
 
-            if ($record instanceof Entity) {
-                $this->entityRecords[] = $record;
-            } elseif ($record instanceof Activity) {
+            if ($record instanceof Activity) {
                 $this->activityRecords[] = $record;
             } elseif ($record instanceof Generation) {
                 $this->generations[] = $record;
@@ -161,12 +156,6 @@ class RecordIndex
                 $this->memberships[] = $record;
             }
         }
-    }
-
-    /** @return list<\Prov\Entity> */
-    public function getEntities(): array
-    {
-        return $this->entityRecords;
     }
 
     /** @return list<\Prov\Activity> */
@@ -243,7 +232,7 @@ class RecordIndex
     /**
      * Entity URIs referenced by any generation, usage, or invalidation, whether
      * or not the entity is declared. Drives the generation/usage/invalidation
-     * ordering checks (36/37/38) so referenced-but-undeclared entities are
+     * ordering checks (36 to 40) so referenced-but-undeclared entities are
      * covered and each entity is examined exactly once.
      *
      * @return list<string>
