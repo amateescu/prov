@@ -164,6 +164,19 @@ final class JsonSerializerTest extends TestCase
         $this->assertArrayHasKey('entity', $data['bundle']['ex:b1']);
     }
 
+    public function testSerializeEmptyBundleAsObject(): void
+    {
+        // A bundle with no records and no own declarations is still a JSON
+        // object; PHP's empty array would encode as the array `[]`.
+        $builder = $this->buildDoc();
+        $builder->bundle('ex:b1');
+
+        $json = $this->serializer->serialize($builder->build());
+
+        $this->assertStringContainsString('"bundle":{"ex:b1":{}}', $json);
+        $this->assertCount(1, $this->serializer->deserialize($json)->bundles);
+    }
+
     public function testSerializeLiteralAttribute(): void
     {
         $builder = $this->buildDoc();

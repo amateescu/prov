@@ -104,7 +104,9 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                     . 'merge them first.',
                 );
             }
-            $output['bundle'][$bundleKey] = $bundleData;
+            // A bundle with no records and no own declarations must still encode
+            // as the object `{}`, never the array `[]`.
+            $output['bundle'][$bundleKey] = $bundleData === [] ? new \stdClass() : $bundleData;
         }
 
         // Declarations for namespaces minted while serializing records. Assigning
