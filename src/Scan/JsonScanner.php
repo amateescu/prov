@@ -54,6 +54,9 @@ final class JsonScanner
 {
     private const string XSD_URI = 'http://www.w3.org/2001/XMLSchema#';
 
+    /** The datatype URI of the PROV-JSON qualified-name tag. */
+    private const string PROV_QUALIFIED_NAME_URI = 'http://www.w3.org/ns/prov#QUALIFIED_NAME';
+
     /** The element sections, in PROV-JSON layout order. */
     private const array ELEMENT_SECTIONS = ['entity', 'activity', 'agent'];
 
@@ -421,6 +424,49 @@ final class JsonScanner
     public static function formalKinds(string $section): array
     {
         return RelationMetadata::jsonFormalKinds($section);
+    }
+
+    /**
+     * Whether a decoded PROV-JSON value names a record rather than holding a
+     * literal, that is whether it is a typed value tagged as a qualified name.
+     * The tag is `prov:QUALIFIED_NAME`, which ProvToolbox and python-prov
+     * write and this library writes too, or `xsd:QName`, the spelling in the
+     * 2013 PROV-JSON submission examples. Both are matched by their literal
+     * token first and by their resolved datatype URI after, so a document that
+     * binds another prefix to the PROV or XSD namespace is read the same way.
+     * Anything else, a bare scalar and a literal under any other datatype
+     * included, is data.
+     *
+     * The reference-typed formals of a relation always name a record and need
+     * no tag; see `formalKinds()`. This is for the positions where either is
+     * allowed: an attribute value, and a formal that is not a reference. A
+     * consumer rewriting stored PROV-JSON has to tell the two apart, because
+     * a literal whose text reads like an identifier is still a literal.
+     *
+     * @param mixed $value
+     *   One decoded PROV-JSON value: a scalar, or the `{"$": ..., "type": ...}`
+     *   map a typed value is written as.
+     */
+    public function isQualifiedNameValue(mixed $value): bool
+    {
+        if (!is_array($value) || !is_string($value['$'] ?? null)) {
+            return false;
+        }
+
+        $type = $value['type'] ?? null;
+        if (!is_string($type)) {
+            return false;
+        }
+        if ($type === 'prov:QUALIFIED_NAME' || $type === 'xsd:QName') {
+            return true;
+        }
+
+        $datatype = $this->tryResolve($type);
+        if ($datatype === null) {
+            return false;
+        }
+        $uri = ValueIdentity::normalizeDatatypeUri($datatype->getUri());
+        return $uri === self::PROV_QUALIFIED_NAME_URI || $uri === ValueIdentity::XSD_QNAME_URI;
     }
 
     /**

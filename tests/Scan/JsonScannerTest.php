@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Prov\Builder\DocumentBuilder;
 use Prov\Document;
+use Prov\Entity;
 use Prov\Exception\DeserializationException;
 use Prov\Identifier\ProvNamespace;
 use Prov\Model\ProvRelation;
@@ -289,6 +290,47 @@ final class JsonScannerTest extends TestCase
                 $this->assertContains($kind, ['ref', 'time', 'array'], $section . ' ' . $key);
             }
         }
+    }
+
+    public function testIsQualifiedNameValueSeparatesNamesFromLiterals(): void
+    {
+        // xs binds the XSD namespace without the trailing hash, the spelling
+        // PROV-XML fixtures use, and p binds the PROV namespace under another
+        // prefix. Both resolve to the tags a qualified-name value carries.
+        $scanner = new JsonScanner(
+            '{"prefix":{"xs":"http://www.w3.org/2001/XMLSchema","p":"http://www.w3.org/ns/prov#"},"entity":{"prov:e1":{}}}',
+        );
+
+        foreach (['prov:QUALIFIED_NAME', 'xsd:QName', 'xs:QName', 'p:QUALIFIED_NAME'] as $tag) {
+            $this->assertTrue($scanner->isQualifiedNameValue(['$' => 'prov:e1', 'type' => $tag]), $tag);
+        }
+
+        // A literal is data whatever its text reads like, and so is a typed
+        // value under any other datatype or a language-tagged one.
+        $this->assertFalse($scanner->isQualifiedNameValue('prov:e1'));
+        $this->assertFalse($scanner->isQualifiedNameValue(['$' => 'prov:e1', 'type' => 'xsd:string']));
+        $this->assertFalse($scanner->isQualifiedNameValue(['$' => 'prov:e1', 'lang' => 'en']));
+        $this->assertFalse($scanner->isQualifiedNameValue(['$' => 'prov:e1', 'type' => 'nosuch:QName']));
+
+        // A damaged value is not a name either: the lexical form has to be
+        // there and it has to be a string, and so does the tag.
+        $this->assertFalse($scanner->isQualifiedNameValue(['type' => 'prov:QUALIFIED_NAME']));
+        $this->assertFalse($scanner->isQualifiedNameValue(['$' => 5, 'type' => 'prov:QUALIFIED_NAME']));
+        $this->assertFalse($scanner->isQualifiedNameValue(['$' => 'prov:e1', 'type' => 5]));
+
+        // The deserializer reads the same value as a QualifiedName, so a
+        // consumer following this predicate follows the same references the
+        // model does.
+        $json =
+            '{"prefix":{"ex":"http://example.org/"},'
+            . '"entity":{"ex:e1":{"ex:cites":{"$":"ex:e2","type":"prov:QUALIFIED_NAME"}}}}';
+        $cites = new ProvNamespace('ex', 'http://example.org/')->qualifiedName('cites');
+        $entity = new JsonSerializer()
+            ->deserialize($json)
+            ->getRecordsByType(Entity::class)[0];
+        $reference = ['$' => 'ex:e2', 'type' => 'prov:QUALIFIED_NAME'];
+        $this->assertSame('http://example.org/e2', $entity->attributes->getQualifiedNames($cites)[0]->getUri());
+        $this->assertTrue(new JsonScanner($json)->isQualifiedNameValue($reference));
     }
 
     public function testHadMemberEntityListReportsEveryMember(): void
