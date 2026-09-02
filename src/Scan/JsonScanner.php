@@ -169,6 +169,23 @@ final class JsonScanner
     }
 
     /**
+     * The same resolve, returning null instead of throwing when the identifier
+     * names nothing this document can resolve. Use it for the values a
+     * document supplies (a relation endpoint, a reference-typed attribute),
+     * where an unknown prefix is bad input rather than a programming error.
+     * The InvalidArgumentException arm keeps the queries damage-tolerant even
+     * if a namespace rejects a local part `resolve()` let through.
+     */
+    public function tryResolve(string $shorthand): ?QualifiedName
+    {
+        try {
+            return $this->resolve($shorthand);
+        } catch (NamespaceException|\InvalidArgumentException) {
+            return null;
+        }
+    }
+
+    /**
      * The ids of a section, as they appear in the document, in document order.
      * Works for `entity`, `activity`, `agent`, and any relation section name.
      * An absent section yields an empty list.
@@ -944,20 +961,6 @@ final class JsonScanner
             return $identifier;
         }
         return $this->tryResolveUri($identifier) ?? $identifier;
-    }
-
-    /**
-     * Resolves an identifier, or null when it names nothing this document can
-     * resolve. The InvalidArgumentException arm keeps the queries damage-tolerant
-     * even if a namespace rejects a local part resolve() let through.
-     */
-    private function tryResolve(string $shorthand): ?QualifiedName
-    {
-        try {
-            return $this->resolve($shorthand);
-        } catch (NamespaceException|\InvalidArgumentException) {
-            return null;
-        }
     }
 
     private function tryResolveUri(string $shorthand): ?string

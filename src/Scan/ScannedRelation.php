@@ -34,4 +34,37 @@ final readonly class ScannedRelation
         public array $endpoints,
         public array $attributes,
     ) {}
+
+    /**
+     * The formal entries keyed by their bare role name, with the `prov:`
+     * prefix a document spells them with stripped. Use it to walk a relation's
+     * positions without caring how the writer prefixed the keys.
+     *
+     * @return array<string, mixed>
+     */
+    public function endpointsByRole(): array
+    {
+        $out = [];
+        foreach (array_keys($this->endpoints) as $key) {
+            $out[str_starts_with($key, 'prov:') ? substr($key, 5) : $key] = $this->endpoints[$key];
+        }
+        return $out;
+    }
+
+    /**
+     * The reference one role names (`entity`, `agent`, `generatedEntity`, ...),
+     * or null when the relation has no such role or the value is not a
+     * reference string. The `prov:` prefix is optional, as it is in the
+     * document. Resolve the result with `JsonScanner::tryResolve()` when you
+     * need URI identity.
+     */
+    public function endpoint(string $role): ?string
+    {
+        foreach (['prov:' . $role, $role] as $key) {
+            if (isset($this->endpoints[$key]) && is_string($this->endpoints[$key])) {
+                return $this->endpoints[$key];
+            }
+        }
+        return null;
+    }
 }
