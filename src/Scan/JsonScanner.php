@@ -400,6 +400,30 @@ final class JsonScanner
     }
 
     /**
+     * The formal PROV-JSON keys of a relation section, mapped to what each key
+     * holds: 'ref' names another record, 'time' is a `prov:time` instant, and
+     * 'array' is a dictionary key set (`prov:key-entity-set` or
+     * `prov:key-set`). A key that is not listed is an attribute of the
+     * relation, and an element section or an unknown section has no formals at
+     * all.
+     *
+     * This is the PROV-JSON layout itself rather than one document's, so it is
+     * static and answers the same for every document. A consumer that rewrites
+     * stored PROV-JSON needs it to tell an entry it must follow from an entry
+     * that holds data: rewriting a `prov:time` or a removed key as if it named
+     * a record corrupts a literal. The kind here is the shape of the value;
+     * the `kind` of `ScannedEndpoint` is the element type a reference points
+     * at.
+     *
+     * @return array<string, 'ref'|'time'|'array'>
+     *   PROV-JSON formal key => kind, in PROV-N positional order.
+     */
+    public static function formalKinds(string $section): array
+    {
+        return RelationMetadata::jsonFormalKinds($section);
+    }
+
+    /**
      * Builds the document's namespace manager from the raw `prefix` map, the
      * same way `JsonSerializer` bootstraps one: the reserved `default` prefix
      * becomes the default namespace, and every other prefix is registered,
@@ -772,7 +796,7 @@ final class JsonScanner
      */
     private function formalKeys(string $section): array
     {
-        return $this->formalKeysCache[$section] ??= RelationMetadata::jsonFormalKeys($section);
+        return $this->formalKeysCache[$section] ??= array_keys(self::formalKinds($section));
     }
 
     /**
@@ -783,20 +807,10 @@ final class JsonScanner
      */
     private function refKeys(string $section): array
     {
-        if (isset($this->refKeysCache[$section])) {
-            return $this->refKeysCache[$section];
-        }
-
-        $class = array_search($section, RelationMetadata::JSON_KEYS, true);
-        $out = [];
-        if ($class !== false) {
-            foreach (RelationMetadata::FORMALS[$class] as $prop => $type) {
-                if ($type === 'ref') {
-                    $out[] = 'prov:' . $prop;
-                }
-            }
-        }
-        return $this->refKeysCache[$section] = $out;
+        return $this->refKeysCache[$section] ??= array_keys(array_filter(
+            self::formalKinds($section),
+            static fn(string $kind): bool => $kind === 'ref',
+        ));
     }
 
     /**

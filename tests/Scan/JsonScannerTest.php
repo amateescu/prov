@@ -256,6 +256,41 @@ final class JsonScannerTest extends TestCase
         $this->assertSame('http://example.org/a1', $endpoints[0]->identifier->getUri());
     }
 
+    public function testFormalKindsClassifyEveryFormalOfASection(): void
+    {
+        // The formal keys come back in PROV-N positional order, each kinded by
+        // what it holds: a reference naming another record, a time, or a
+        // dictionary key set. A consumer rewriting stored PROV-JSON follows the
+        // references and leaves the rest alone.
+        $this->assertSame(
+            ['prov:entity' => 'ref', 'prov:activity' => 'ref', 'prov:time' => 'time'],
+            JsonScanner::formalKinds('wasGeneratedBy'),
+        );
+        $this->assertSame(
+            ['prov:dictionary' => 'ref', 'prov:key-entity-set' => 'array'],
+            JsonScanner::formalKinds('hadDictionaryMember'),
+        );
+        $this->assertSame(
+            ['prov:after' => 'ref', 'prov:before' => 'ref', 'prov:key-set' => 'array'],
+            JsonScanner::formalKinds('derivedByRemovalFrom'),
+        );
+
+        // An element section and an unknown section have no formals at all, so
+        // every entry of such a record body is an attribute.
+        $this->assertSame([], JsonScanner::formalKinds('entity'));
+        $this->assertSame([], JsonScanner::formalKinds('nosuchsection'));
+
+        // Every relation section is classified, and those are the only kinds.
+        foreach (RelationMetadata::JSON_KEYS as $section) {
+            $kinds = JsonScanner::formalKinds($section);
+            $this->assertNotSame([], $kinds, $section);
+            foreach ($kinds as $key => $kind) {
+                $this->assertStringStartsWith('prov:', $key);
+                $this->assertContains($kind, ['ref', 'time', 'array'], $section . ' ' . $key);
+            }
+        }
+    }
+
     public function testHadMemberEntityListReportsEveryMember(): void
     {
         // PROV-JSON lets hadMember carry several entities under one prov:entity

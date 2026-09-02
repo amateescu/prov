@@ -43,7 +43,7 @@ final class RelationMetadata
      * where type is 'ref' (QualifiedName reference), 'time' (DateTimeImmutable),
      * or 'array' (dictionary key-entity pairs / removed keys).
      *
-     * @var array<class-string<\Prov\Model\ProvRelation>, array<string, string>>
+     * @var array<class-string<\Prov\Model\ProvRelation>, array<string, 'ref'|'time'|'array'>>
      */
     public const array FORMALS = [
         Generation::class => ['entity' => 'ref', 'activity' => 'ref', 'time' => 'time'],
@@ -477,24 +477,40 @@ final class RelationMetadata
      */
     public static function jsonFormalKeys(string $jsonKey): array
     {
-        $class = array_search($jsonKey, self::JSON_KEYS, true);
-        if ($class === false) {
-            return [];
-        }
+        return array_keys(self::jsonFormalKinds($jsonKey));
+    }
 
-        $result = [];
-        foreach (self::FORMALS[$class] as $prop => $type) {
-            if ($type === 'array') {
-                $result[] = match ($prop) {
-                    'keyEntityPairs' => 'prov:key-entity-set',
-                    'removedKeys' => 'prov:key-set',
-                    default => 'prov:' . $prop,
-                };
-            } else {
-                $result[] = 'prov:' . $prop;
+    /**
+     * FORMALS re-keyed by PROV-JSON relation key and PROV-JSON formal key, so a
+     * reader working off decoded PROV-JSON gets the key it sees in the document
+     * rather than the property name. The two array-typed formals have keys of
+     * their own (`prov:key-entity-set`, `prov:key-set`); every other formal is
+     * its property name under the `prov:` prefix. A non-relation or unknown
+     * section has no formals. Built once and cached.
+     *
+     * @return array<string, 'ref'|'time'|'array'>
+     *   PROV-JSON formal key => the kind of value it holds, in PROV-N
+     *   positional order.
+     */
+    public static function jsonFormalKinds(string $jsonKey): array
+    {
+        /** @var array<string, array<string, 'ref'|'time'|'array'>>|null $map */
+        static $map = null;
+        if ($map === null) {
+            $map = [];
+            foreach (self::JSON_KEYS as $class => $section) {
+                $kinds = [];
+                foreach (self::FORMALS[$class] as $prop => $kind) {
+                    $key = match ($prop) {
+                        'keyEntityPairs' => 'prov:key-entity-set',
+                        'removedKeys' => 'prov:key-set',
+                        default => 'prov:' . $prop,
+                    };
+                    $kinds[$key] = $kind;
+                }
+                $map[$section] = $kinds;
             }
         }
-
-        return $result;
+        return $map[$jsonKey] ?? [];
     }
 }
