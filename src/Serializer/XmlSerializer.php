@@ -44,9 +44,9 @@ use Prov\Relation\Usage;
  * Serializes Documents to and parses them from PROV-XML, the W3C's
  * XML-based interchange format for PROV.
  *
- * The root binds prov and xsd to their canonical namespaces, because the output
- * carries prov:* and xsd:* terms of its own. A document that binds either
- * prefix elsewhere keeps that namespace under a minted prefix.
+ * The root binds prov and xsd itself, because the output carries prov:* and
+ * xsd:* terms of its own. A document that binds either prefix to another
+ * namespace keeps that namespace under a minted prefix.
  *
  * @mago-ignore analysis:possibly-false-argument
  * @mago-ignore analysis:invalid-method-access
@@ -57,6 +57,16 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     private const string PROV_NS = 'http://www.w3.org/ns/prov#';
     private const string XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
     private const string XSD_NS = 'http://www.w3.org/2001/XMLSchema';
+
+    /**
+     * The prefixes the root binds itself and the exact namespace each one
+     * names. The `xsd` binding has no trailing `#`, so `xsi:type="xsd:int"`
+     * names the XML Schema type; a document that binds `xsd` to the `#` form
+     * names another namespace, and names under it go through the minter.
+     * Literal datatypes are the exception: `ValueIdentity::datatypeIn()`
+     * moves them to this binding.
+     */
+    private const array RESERVED_NAMESPACES = ['prov' => self::PROV_NS, 'xsd' => self::XSD_NS];
 
     private PrefixMinter $minter;
 
@@ -100,14 +110,15 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:xsi', self::XSI_NS);
         $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:xsd', self::XSD_NS);
 
-        $nsManager = new NamespaceManager();
+        $nsManager = self::reservedScope();
         foreach (OutputOrder::namespaces($document->namespaces) as $ns) {
-            if ($ns->prefix === 'prov' || $ns->prefix === 'xsd') {
-                // The root binds both prefixes to their canonical namespaces
-                // and the body writes prov:* and xsd:* terms against them. A
-                // declaration that agrees joins the scope; a foreign one is
-                // left out, so the minter gives its names another prefix.
-                if ($ns->isCanonicalReservedBinding()) {
+            $reserved = self::RESERVED_NAMESPACES[$ns->prefix] ?? null;
+            if ($reserved !== null) {
+                // The root binds both prefixes and the body writes prov:* and
+                // xsd:* terms against them. A declaration naming the same
+                // namespace joins the scope; any other one is left out, so the
+                // minter gives its names another prefix.
+                if ($reserved === $ns->uri) {
                     $nsManager->addOrReplace($ns);
                 }
                 continue;
@@ -150,6 +161,19 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             throw new \RuntimeException('DOMDocument::saveXML failed on a well-formed document.');
         }
         return $xml;
+    }
+
+    /**
+     * A namespace scope seeded with the root's own prov and xsd bindings. The
+     * manager's built-in xsd is the `#` form, which the output does not bind.
+     */
+    private static function reservedScope(?NamespaceManager $parent = null): NamespaceManager
+    {
+        $manager = new NamespaceManager($parent);
+        foreach (self::RESERVED_NAMESPACES as $prefix => $uri) {
+            $manager->addOrReplace(new ProvNamespace($prefix, $uri));
+        }
+        return $manager;
     }
 
     private function serializeRecord(
@@ -278,6 +302,25 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         return $this->minter->token($qn, $nsManager);
     }
 
+    /**
+     * The `xsi:type` QName for a literal datatype. XSD datatypes are written
+     * against the root's own xsd binding whichever spelling the model carries.
+     */
+    private function xmlDatatype(QualifiedName $datatype, NamespaceManager $nsManager): string
+    {
+        return $this->xmlIdentifier(ValueIdentity::datatypeIn($datatype, self::xsdNamespace()), $nsManager);
+    }
+
+    /**
+     * The `xsd` namespace as PROV-XML binds it, without a trailing `#`.
+     */
+    private static function xsdNamespace(): ProvNamespace
+    {
+        /** @var \Prov\Identifier\ProvNamespace|null $instance */
+        static $instance = null;
+        return $instance ??= new ProvNamespace('xsd', self::XSD_NS);
+    }
+
     private function setTypedTextContent(\DOMElement $el, mixed $value, NamespaceManager $nsManager): void
     {
         if ($value instanceof QualifiedName) {
@@ -291,7 +334,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             $el->textContent = $this->xmlIdentifier($value, $nsManager);
         } elseif ($value instanceof Literal) {
             if ($value->datatype !== null) {
-                $el->setAttributeNS(self::XSI_NS, 'xsi:type', $this->xmlIdentifier($value->datatype, $nsManager));
+                $el->setAttributeNS(self::XSI_NS, 'xsi:type', $this->xmlDatatype($value->datatype, $nsManager));
             }
             if ($value->languageTag !== null) {
                 $el->setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', $value->languageTag);
@@ -450,7 +493,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             if ($value->languageTag !== null) {
                 $el->setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', $value->languageTag);
             } elseif ($value->datatype !== null) {
-                $el->setAttributeNS(self::XSI_NS, 'xsi:type', $this->xmlIdentifier($value->datatype, $nsManager));
+                $el->setAttributeNS(self::XSI_NS, 'xsi:type', $this->xmlDatatype($value->datatype, $nsManager));
             }
             $this->writeLiteralValue($el, $value);
         } elseif (is_bool($value)) {
@@ -487,17 +530,18 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         // default namespace is neither declared nor registered on the bundle
         // scope: the bundleContent default stays the document's, and a name in
         // the bundle default is written through a real prefix instead.
-        $bundleNsManager = new NamespaceManager($nsManager);
+        $bundleNsManager = self::reservedScope($nsManager);
         foreach (OutputOrder::namespaces($bundle->namespaces) as $ns) {
             $existing = $nsManager->getNamespace($ns->prefix);
             if ($existing !== null && $existing->uri === $ns->uri || $ns->prefix === 'default') {
                 continue;
             }
-            if ($ns->prefix === 'prov' || $ns->prefix === 'xsd') {
-                // Same rule as at document level: the root's canonical bindings
-                // stand, and a foreign one for either prefix stays out of the
+            $reserved = self::RESERVED_NAMESPACES[$ns->prefix] ?? null;
+            if ($reserved !== null) {
+                // Same rule as at document level: the root's bindings stand,
+                // and a declaration naming another namespace stays out of the
                 // scope so its names get a minted prefix.
-                if ($ns->isCanonicalReservedBinding()) {
+                if ($reserved === $ns->uri) {
                     $bundleNsManager->addOrReplace($ns);
                 }
                 continue;

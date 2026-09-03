@@ -8,6 +8,7 @@ use Prov\Activity;
 use Prov\Agent;
 use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
+use Prov\Attribute\ValueIdentity;
 use Prov\Bundle;
 use Prov\Document;
 use Prov\Entity;
@@ -42,6 +43,18 @@ class ProvNSerializer implements ProvSerializerInterface
         Alternate::class => true,
         Membership::class => true,
         Mention::class => true,
+    ];
+
+    /**
+     * The prefixes PROV-N binds implicitly and the exact namespace each one
+     * names. The `xsd` binding carries the trailing `#`; a document that binds
+     * `xsd` to the form without it names another namespace, and names under
+     * it go through the minter. Literal datatypes are the exception:
+     * `ValueIdentity::datatypeIn()` moves them to this binding.
+     */
+    private const array RESERVED_NAMESPACES = [
+        'prov' => 'http://www.w3.org/ns/prov#',
+        'xsd' => 'http://www.w3.org/2001/XMLSchema#',
     ];
 
     private readonly string $indentPrefix;
@@ -145,6 +158,10 @@ class ProvNSerializer implements ProvSerializerInterface
     /**
      * The namespace scope a container's names are written against.
      *
+     * A declaration that binds `prov` or `xsd` to a namespace other than the
+     * one in `RESERVED_NAMESPACES` is dropped, so `PrefixMinter` gives its
+     * names a prefix of their own and the header declares it.
+     *
      * With `includeDefaultNamespace` off no `default` declaration is written,
      * so the scope drops the default namespace too. `PrefixMinter` then finds
      * no scope default, mints a real prefix for names in that namespace, and
@@ -154,12 +171,13 @@ class ProvNSerializer implements ProvSerializerInterface
      */
     private function scopeManager(array $namespaces, ?NamespaceManager $parent = null): NamespaceManager
     {
-        if (!$this->includeDefaultNamespace) {
-            $namespaces = array_values(array_filter(
-                $namespaces,
-                static fn(ProvNamespace $ns): bool => $ns->prefix !== 'default',
-            ));
-        }
+        $namespaces = array_values(array_filter($namespaces, function (ProvNamespace $ns): bool {
+            if ($ns->prefix === 'default') {
+                return $this->includeDefaultNamespace;
+            }
+            $reserved = self::RESERVED_NAMESPACES[$ns->prefix] ?? null;
+            return $reserved === null || $reserved === $ns->uri;
+        }));
         return NamespaceManager::forContainer($namespaces, $parent);
     }
 
@@ -167,8 +185,9 @@ class ProvNSerializer implements ProvSerializerInterface
      * The `prefix`/`default` declaration lines for a document or bundle block.
      *
      * PROV-N declares `prov` and `xsd` itself and forbids redeclaring them, so
-     * a canonical binding for either is checked and then left out. Every other
-     * declaration is validated and written.
+     * neither prefix is ever written: a matching binding is implicit and a
+     * foreign one is out of the scope already (see `scopeManager()`). Every
+     * other declaration is validated and written.
      *
      * @param list<\Prov\Identifier\ProvNamespace> $namespaces
      *
@@ -178,10 +197,10 @@ class ProvNSerializer implements ProvSerializerInterface
     {
         $lines = [];
         foreach ($namespaces as $ns) {
-            $this->assertSafeNamespace($ns);
-            if ($ns->isCanonicalReservedBinding()) {
+            if (isset(self::RESERVED_NAMESPACES[$ns->prefix])) {
                 continue;
             }
+            $this->assertSafeNamespace($ns);
             if ($ns->prefix === 'default') {
                 if ($this->includeDefaultNamespace) {
                     $lines[] = $indent . "default <{$ns->uri}>";
@@ -455,7 +474,10 @@ class ProvNSerializer implements ProvSerializerInterface
         if ($value instanceof Literal) {
             $str = '"' . $this->escapeString($value->value) . '"';
             if ($value->datatype !== null) {
-                $str .= ' %% ' . $this->formatQualifiedName($value->datatype, $nsManager);
+                // XSD datatypes are written against the implicit xsd binding
+                // whichever spelling the model carries.
+                $datatype = ValueIdentity::datatypeIn($value->datatype, ProvNamespace::xsd());
+                $str .= ' %% ' . $this->formatQualifiedName($datatype, $nsManager);
             }
             if ($value->languageTag !== null) {
                 $this->assertSafeLangTag($value->languageTag);
@@ -490,12 +512,6 @@ class ProvNSerializer implements ProvSerializerInterface
     private function assertSafeNamespace(ProvNamespace $ns): void
     {
         if ($ns->prefix !== 'default') {
-            if (($ns->prefix === 'prov' || $ns->prefix === 'xsd') && !$ns->isCanonicalReservedBinding()) {
-                throw new \InvalidArgumentException(
-                    "PROV-N declares the prefix '{$ns->prefix}' implicitly and forbids redeclaring it, "
-                    . "so it cannot be bound to '{$ns->uri}'. Rename the prefix before serializing.",
-                );
-            }
             if (!self::isValidPrefix($ns->prefix)) {
                 throw new \InvalidArgumentException(
                     "Namespace prefix '{$ns->prefix}' cannot be represented in PROV-N.",

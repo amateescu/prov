@@ -8,10 +8,12 @@ use Prov\Activity;
 use Prov\Agent;
 use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
+use Prov\Attribute\ValueIdentity;
 use Prov\Document;
 use Prov\Entity;
 use Prov\Exception\ProvException;
 use Prov\Identifier\NamespaceManager;
+use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\ProvElement;
 use Prov\Model\ProvRelation;
@@ -30,9 +32,9 @@ use Prov\Relation\Dictionary\DictionaryEntry;
  * instead, so every compact IRI in the output expands to the URI the model
  * carries.
  *
- * The context always binds prov and xsd to their canonical namespaces, because
- * the serializer writes prov:* and xsd:* terms of its own. A document that
- * binds either prefix elsewhere keeps that namespace under a minted prefix.
+ * The context always binds prov and xsd itself, because the serializer writes
+ * prov:* and xsd:* terms of its own. A document that binds either prefix to
+ * another namespace keeps that namespace under a minted prefix.
  *
  * PROV-O models specializationOf, alternateOf, hadMember and mentionOf as plain
  * object properties with no qualified form, and PROV-Dictionary does the same
@@ -44,6 +46,15 @@ class JsonLdSerializer implements ProvSerializerInterface
 {
     private const string PROV_URI = 'http://www.w3.org/ns/prov#';
     private const string XSD_URI = 'http://www.w3.org/2001/XMLSchema#';
+
+    /**
+     * The prefixes the context binds itself and the exact namespace each one
+     * names. The `xsd` binding carries the trailing `#`; a document that binds
+     * `xsd` to the form without it names another namespace, and names under
+     * it go through the minter. Literal datatypes are the exception:
+     * `ValueIdentity::datatypeIn()` moves them to this binding.
+     */
+    private const array RESERVED_NAMESPACES = ['prov' => self::PROV_URI, 'xsd' => self::XSD_URI];
 
     private BlankLabelMinter $blankLabelMinter;
 
@@ -136,20 +147,18 @@ class JsonLdSerializer implements ProvSerializerInterface
     }
 
     /**
-     * The namespace scope the document's names are written against.
-     *
-     * The context binds prov and xsd to their canonical namespaces because the
-     * serializer writes prov:* and xsd:* terms itself. A document that binds
-     * either prefix to another namespace keeps that namespace, but not the
-     * prefix: the declaration stays out of the scope, so `PrefixMinter` gives
-     * its names a prefix of their own and every compact IRI still expands to
-     * the URI the model carries.
+     * The namespace scope the document's names are written against: the
+     * document's declarations, minus any that bind a reserved prefix to a
+     * namespace other than the one in `RESERVED_NAMESPACES`. A dropped
+     * declaration keeps its namespace but not its prefix, so `PrefixMinter`
+     * gives its names a prefix of their own.
      */
     private static function contextManager(Document $document): NamespaceManager
     {
         $namespaces = [];
         foreach ($document->namespaces as $ns) {
-            if (($ns->prefix === 'prov' || $ns->prefix === 'xsd') && !$ns->isCanonicalReservedBinding()) {
+            $reserved = self::RESERVED_NAMESPACES[$ns->prefix] ?? null;
+            if ($reserved !== null && $reserved !== $ns->uri) {
                 continue;
             }
             $namespaces[] = $ns;
@@ -586,7 +595,12 @@ class JsonLdSerializer implements ProvSerializerInterface
         if ($value instanceof Literal) {
             $result = ['@value' => $value->value];
             if ($value->datatype !== null) {
-                $result['@type'] = $this->jsonLdId($value->datatype, $context);
+                // XSD datatypes are written against the context's own xsd
+                // binding whichever spelling the model carries.
+                $result['@type'] = $this->jsonLdId(
+                    ValueIdentity::datatypeIn($value->datatype, ProvNamespace::xsd()),
+                    $context,
+                );
             }
             if ($value->languageTag !== null) {
                 $result['@language'] = $value->languageTag;

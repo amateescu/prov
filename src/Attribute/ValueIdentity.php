@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Prov\Attribute;
 
+use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
 
 /**
@@ -23,6 +24,12 @@ use Prov\Identifier\QualifiedName;
  */
 final class ValueIdentity
 {
+    /**
+     * The XSD namespace without its trailing `#`. It occurs in both spellings:
+     * PROV-XML declares it bare, PROV-JSON and PROV-N with the `#`.
+     */
+    private const string XSD_NS_URI = 'http://www.w3.org/2001/XMLSchema';
+
     public const string XSD_STRING_URI = 'http://www.w3.org/2001/XMLSchema#string';
     public const string XML_LITERAL_URI = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral';
     public const string XSD_QNAME_URI = 'http://www.w3.org/2001/XMLSchema#QName';
@@ -111,11 +118,29 @@ final class ValueIdentity
      */
     public static function normalizeDatatypeUri(string $uri): string
     {
-        $withoutHash = 'http://www.w3.org/2001/XMLSchema';
-        if (str_starts_with($uri, $withoutHash) && !str_starts_with($uri, $withoutHash . '#')) {
-            return $withoutHash . '#' . substr($uri, strlen($withoutHash));
+        if (str_starts_with($uri, self::XSD_NS_URI) && !str_starts_with($uri, self::XSD_NS_URI . '#')) {
+            return self::XSD_NS_URI . '#' . substr($uri, strlen(self::XSD_NS_URI));
         }
         return $uri;
+    }
+
+    /**
+     * The same datatype name under `$xsd` when `$datatype` sits in the XSD
+     * namespace under either spelling; any other datatype unchanged.
+     *
+     * Each serializer binds `xsd` to one spelling and writes XSD datatypes
+     * against it, so a datatype the model carries in the other spelling still
+     * comes out as an `xsd:` term instead of a minted prefix. The two spellings
+     * name one datatype, the same rule `normalizeDatatypeUri()` applies.
+     */
+    public static function datatypeIn(QualifiedName $datatype, ProvNamespace $xsd): QualifiedName
+    {
+        $uri = $datatype->namespace->uri;
+        $inXsd = $uri === self::XSD_NS_URI || $uri === self::XSD_NS_URI . '#';
+        if (!$inXsd || $uri === $xsd->uri) {
+            return $datatype;
+        }
+        return new QualifiedName($xsd, $datatype->localPart);
     }
 
     /**

@@ -78,13 +78,19 @@ PROV serializations are unordered (a document is a set of records, namespaces a 
 $json = new JsonSerializer(sortRecords: true)->serialize($doc);
 ```
 
+### Reserved prefixes
+
+Every serializer binds `prov` and `xsd` itself, because it writes `prov:*` and `xsd:*` terms of its own: PROV-XML on the document root, PROV-JSONLD in the `@context`, PROV-N through the grammar. A document that binds either prefix to another namespace keeps the namespace but not the prefix, and the names under it are written through a minted prefix, so every name still expands to the URI the model carries.
+
+The XSD namespace has two spellings, `http://www.w3.org/2001/XMLSchema` (what PROV-XML binds, so that `xsi:type="xsd:int"` names an XML Schema type) and the same URI with a trailing `#` (what PROV-JSONLD and PROV-N bind). They build a different URI for every name, so a document binding `xsd` to the spelling a format does not use gets a minted prefix there too. Literal datatypes are the exception: an XSD datatype is written against the format's own `xsd` binding whichever spelling the model carries, and the two spellings compare equal.
+
 ### PROV-N notes
 
 The PROV-N parser accepts two convenience extensions beyond the published grammar, so input that parses here is not necessarily canonical PROV-N: line (`//`) and block (`/* */`) comments, and optional commas between a relation's arguments. Output always uses the canonical form.
 
 PROV-N has no slot for an explicit identifier on `specializationOf`, `alternateOf`, `hadMember`, or `mentionOf`, and `hadDictionaryMember` has room for neither an identifier nor attributes. When a document carries one of these relations *with* an identifier (legal in PROV-JSON/PROV-XML), the PROV-N serializer drops the identifier, since the grammar cannot express it. `DocumentComparator::equals()` will flag the difference on a JSON-to-PROV-N-to-JSON round trip; keep such relations in PROV-JSON or PROV-XML if their identifiers matter.
 
-The `prov` and `xsd` prefixes are implicit in PROV-N and the grammar forbids redeclaring them, so the serializer never writes those declarations and refuses a document that binds either prefix to another namespace. Rename the prefix first. Every other prefix is checked against the `PN_PREFIX` production before it is written, Unicode included, so a prefix that starts with a digit or ends in a dot is refused rather than emitted as unparseable text.
+The `prov` and `xsd` prefixes are implicit in PROV-N and the grammar forbids redeclaring them, so the serializer never writes those declarations; a document that binds either prefix elsewhere is handled as described under "Reserved prefixes" above. Every other prefix is checked against the `PN_PREFIX` production before it is written, Unicode included, so a prefix that starts with a digit or ends in a dot is refused rather than emitted as unparseable text.
 
 ### PROV-JSONLD notes
 

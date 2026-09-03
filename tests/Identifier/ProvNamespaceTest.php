@@ -53,17 +53,4 @@ final class ProvNamespaceTest extends TestCase
         $ns = new ProvNamespace('ex', 'http://example.org/');
         $this->assertSame('http://example.org/', (string) $ns);
     }
-
-    public function testCanonicalReservedBinding(): void
-    {
-        $this->assertTrue(ProvNamespace::prov()->isCanonicalReservedBinding());
-        $this->assertTrue(ProvNamespace::xsd()->isCanonicalReservedBinding());
-        // PROV-XML spells the XSD namespace without the trailing '#'.
-        $this->assertTrue(new ProvNamespace('xsd', 'http://www.w3.org/2001/XMLSchema')->isCanonicalReservedBinding());
-
-        $this->assertFalse(new ProvNamespace('prov', 'http://foreign.example/prov#')->isCanonicalReservedBinding());
-        $this->assertFalse(new ProvNamespace('xsd', 'http://foreign.example/xsd#')->isCanonicalReservedBinding());
-        // Only the two reserved prefixes count, whatever namespace they name.
-        $this->assertFalse(new ProvNamespace('p', 'http://www.w3.org/ns/prov#')->isCanonicalReservedBinding());
-    }
 }

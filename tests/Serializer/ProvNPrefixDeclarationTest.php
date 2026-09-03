@@ -19,9 +19,10 @@ use Prov\Serializer\ProvNSerializer;
 
 /**
  * PROV-N declares the `prov` and `xsd` prefixes implicitly and forbids
- * redeclaring them, and a written prefix has to match the `PN_PREFIX`
- * production. The serializer emits canonical syntax even where the parser is
- * more permissive.
+ * redeclaring them, so a document that binds either prefix to another
+ * namespace has its names written through a minted prefix. A written prefix
+ * has to match the `PN_PREFIX` production. The serializer emits canonical
+ * syntax even where the parser is more permissive.
  */
 final class ProvNPrefixDeclarationTest extends TestCase
 {
@@ -165,12 +166,21 @@ final class ProvNPrefixDeclarationTest extends TestCase
         yield 'xsd rebound' => [new ProvNamespace('xsd', 'http://elsewhere.example/xsd#')];
     }
 
+    /**
+     * PROV-N cannot write a `prov` or `xsd` declaration, so a document that
+     * binds either prefix to another namespace gets a minted prefix for the
+     * names under it. The namespace itself survives.
+     */
     #[DataProvider('reservedRebindings')]
-    public function testRebindingAReservedPrefixIsRejected(ProvNamespace $namespace): void
+    public function testRebindingAReservedPrefixGetsAMintedPrefix(ProvNamespace $namespace): void
     {
         $document = new Document([new Entity(new QualifiedName($namespace, 'e1'))], [], [$namespace]);
 
-        $this->assertRejected($document);
+        $output = $this->serializer->serialize($document);
+        $this->assertStringNotContainsString("prefix {$namespace->prefix} ", $output);
+
+        $back = $this->deserializer->deserialize($output);
+        $this->assertSame($namespace->uri . 'e1', $back->records[0]->identifier?->getUri());
     }
 
     /**
@@ -189,7 +199,7 @@ final class ProvNPrefixDeclarationTest extends TestCase
     }
 
     #[DataProvider('reservedRebindings')]
-    public function testRebindingAReservedPrefixInABundleIsRejected(ProvNamespace $namespace): void
+    public function testRebindingAReservedPrefixInABundleGetsAMintedPrefix(ProvNamespace $namespace): void
     {
         $document = new Document(
             [],
@@ -203,6 +213,10 @@ final class ProvNPrefixDeclarationTest extends TestCase
             [$this->ex],
         );
 
-        $this->assertRejected($document);
+        $output = $this->serializer->serialize($document);
+        $this->assertStringNotContainsString("prefix {$namespace->prefix} ", $output);
+
+        $back = $this->deserializer->deserialize($output);
+        $this->assertSame($namespace->uri . 'e1', $back->bundles[0]->records[0]->identifier?->getUri());
     }
 }
