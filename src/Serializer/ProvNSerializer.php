@@ -49,6 +49,18 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private PrefixMinter $minter;
 
+    /**
+     * @param int $indentation
+     *   Number of spaces per nesting level.
+     * @param bool $includeDefaultNamespace
+     *   Whether to write the `default <uri>` declaration. With it off, names in
+     *   the default namespace are written through a minted prefix that the
+     *   header declares, so the output still parses back to the same URIs. The
+     *   output is never bare local names without a declaration.
+     * @param bool $sortRecords
+     *   Whether to order records into PROV-DM concept order instead of keeping
+     *   the document's own order.
+     */
     public function __construct(
         public readonly int $indentation = 2,
         public readonly bool $includeDefaultNamespace = true,
@@ -67,7 +79,7 @@ class ProvNSerializer implements ProvSerializerInterface
     #[\NoDiscard]
     public function serialize(Document $document): string
     {
-        $nsManager = NamespaceManager::forContainer($document->namespaces);
+        $nsManager = $this->scopeManager($document->namespaces);
         $minter = new PrefixMinter($nsManager);
         $this->minter = $minter;
 
@@ -108,7 +120,7 @@ class ProvNSerializer implements ProvSerializerInterface
     /** @param list<string> $lines */
     private function serializeBundle(Bundle $bundle, array &$lines, NamespaceManager $parentNsManager): void
     {
-        $nsManager = NamespaceManager::forContainer($bundle->namespaces, $parentNsManager);
+        $nsManager = $this->scopeManager($bundle->namespaces, $parentNsManager);
 
         $indent = $this->indentPrefix;
         $indent2 = $indent . $indent;
@@ -129,6 +141,27 @@ class ProvNSerializer implements ProvSerializerInterface
         }
 
         $lines[] = $indent . 'endBundle';
+    }
+
+    /**
+     * The namespace scope a container's names are written against.
+     *
+     * With `includeDefaultNamespace` off no `default` declaration is written,
+     * so the scope drops the default namespace too. `PrefixMinter` then finds
+     * no scope default, mints a real prefix for names in that namespace, and
+     * the header declares it.
+     *
+     * @param list<\Prov\Identifier\ProvNamespace> $namespaces
+     */
+    private function scopeManager(array $namespaces, ?NamespaceManager $parent = null): NamespaceManager
+    {
+        if (!$this->includeDefaultNamespace) {
+            $namespaces = array_values(array_filter(
+                $namespaces,
+                static fn(ProvNamespace $ns): bool => $ns->prefix !== 'default',
+            ));
+        }
+        return NamespaceManager::forContainer($namespaces, $parent);
     }
 
     /**

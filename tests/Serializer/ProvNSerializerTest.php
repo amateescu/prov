@@ -9,6 +9,7 @@ use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
 use Prov\Builder\DocumentBuilder;
 use Prov\Identifier\ProvNamespace;
+use Prov\Serializer\ProvNDeserializer;
 use Prov\Serializer\ProvNSerializer;
 
 final class ProvNSerializerTest extends TestCase
@@ -248,6 +249,35 @@ final class ProvNSerializerTest extends TestCase
         $output = $serializer->serialize($builder->build());
 
         $this->assertStringNotContainsString('default <http://default.org/>', $output);
+    }
+
+    public function testSuppressedDefaultNamespaceStillRoundTrips(): void
+    {
+        $serializer = new ProvNSerializer(includeDefaultNamespace: false);
+        $builder = new DocumentBuilder();
+        $builder->setDefaultNamespace(new ProvNamespace('default', 'http://default.org/'));
+        $builder->entity('myEntity');
+
+        $output = $serializer->serialize($builder->build());
+        $this->assertStringNotContainsString('default <http://default.org/>', $output);
+
+        $document = new ProvNDeserializer()->deserialize($output);
+        $this->assertSame('http://default.org/myEntity', $document->records[0]->identifier?->getUri());
+    }
+
+    public function testSuppressedBundleDefaultNamespaceStillRoundTrips(): void
+    {
+        $serializer = new ProvNSerializer(includeDefaultNamespace: false);
+        $builder = $this->buildDoc();
+        $bundle = $builder->bundle('ex:b1');
+        $bundle->setDefaultNamespace(new ProvNamespace('default', 'http://bundled.org/'));
+        $bundle->entity('bundledEntity');
+
+        $output = $serializer->serialize($builder->build());
+        $this->assertStringNotContainsString('default <http://bundled.org/>', $output);
+
+        $document = new ProvNDeserializer()->deserialize($output);
+        $this->assertSame('http://bundled.org/bundledEntity', $document->bundles[0]->records[0]->identifier?->getUri());
     }
 
     public function testLiteralWithLanguageTag(): void
