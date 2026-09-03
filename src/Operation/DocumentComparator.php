@@ -10,6 +10,7 @@ use Prov\Attribute\Literal;
 use Prov\Attribute\ValueIdentity;
 use Prov\Document;
 use Prov\Identifier\QualifiedName;
+use Prov\Model\BlankNodes;
 use Prov\Model\ProvRecord;
 use Prov\Model\ProvRelation;
 use Prov\Model\RelationMetadata;
@@ -24,12 +25,28 @@ use Prov\Model\RelationMetadata;
  * Blank-node references are compared up to renaming: each blank label is replaced
  * by a canonical label derived from the records it occurs in (iteratively refined,
  * so distinct neighborhoods get distinct labels), and two documents that differ
- * only in their blank labels compare equal. Structurally indistinguishable blank
- * nodes share a canonical label; their records are then distinguished by count,
- * since identical records are compared as a multiset.
+ * only in their blank labels compare equal. Identical records are compared as a
+ * multiset, so duplicate anonymous records still have to match in count.
+ *
+ * Refinement alone cannot tell apart blank nodes in a symmetric graph, and two
+ * graphs whose blanks get the same labels are not necessarily the same graph
+ * (a six-node cycle and two three-node cycles are the standard example). When
+ * one label covers more than one blank node, the comparison goes on to search
+ * for an actual renaming that makes the record multisets equal, singling out
+ * one blank at a time and refining again after each choice.
  */
 final class DocumentComparator
 {
+    /**
+     * The most individualization branches one record-set comparison may explore
+     * before it gives up. Refinement decides every graph whose blank nodes are
+     * distinguishable, so the search only runs on symmetric graphs, and the
+     * pruning below cuts a branch as soon as the two sides stop matching. A
+     * budget this large is out of reach for anything but a deliberately
+     * constructed input.
+     */
+    private const int BIJECTION_SEARCH_BUDGET = 50_000;
+
     /**
      * Returns true if two Documents are semantically equivalent.
      */
@@ -87,9 +104,14 @@ final class DocumentComparator
      */
     private static function recordSetDiff(array $setA, array $setB, string $scope): array
     {
+        $graphA = self::blankNodeGraph($setA);
+        $graphB = self::blankNodeGraph($setB);
+        $labelsA = $graphA->refine([]);
+        $labelsB = $graphB->refine([]);
+
         $messages = [];
-        $sigsA = self::signatureCounts($setA);
-        $sigsB = self::signatureCounts($setB);
+        $sigsA = self::signatureCounts($setA, $labelsA);
+        $sigsB = self::signatureCounts($setB, $labelsB);
 
         foreach ($sigsA as $sig => [$record, $countA]) {
             if (!isset($sigsB[$sig])) {
@@ -108,7 +130,22 @@ final class DocumentComparator
             }
         }
 
-        return $messages;
+        if ($messages !== [] || !self::hasAmbiguousLinkedBlanks($labelsA, $graphA)) {
+            return $messages;
+        }
+
+        // Refinement could not tell some linked blank nodes apart, so equal
+        // signature multisets are not yet proof: a six-node cycle and two
+        // three-node cycles get identical labels. Look for a renaming that
+        // makes the exact record multisets match.
+        $budget = self::BIJECTION_SEARCH_BUDGET;
+        if (self::blankBijectionExists($setA, $setB, $graphA, $graphB, $labelsA, $labelsB, $budget)) {
+            return [];
+        }
+        if ($budget < 0) {
+            return [$scope . 'anonymous records are too symmetric to compare; the search for a renaming gave up.'];
+        }
+        return [$scope . 'no renaming of the anonymous records makes the two record sets equal.'];
     }
 
     /**
@@ -117,12 +154,12 @@ final class DocumentComparator
      * a multiset instead of collapsing into one.
      *
      * @param list<\Prov\Model\ProvRecord> $records
+     * @param array<string, string> $labels
      *
      * @return array<string, array{\Prov\Model\ProvRecord, int}>
      */
-    private static function signatureCounts(array $records): array
+    private static function signatureCounts(array $records, array $labels): array
     {
-        $labels = self::canonicalBlankLabels($records);
         $out = [];
         foreach ($records as $record) {
             $sig = self::recordSignature($record, $labels);
@@ -133,96 +170,252 @@ final class DocumentComparator
     }
 
     /**
-     * Computes a canonical label for every blank node in the record set, so two
-     * documents identical up to blank renaming sign identically. Labels start
-     * from the multiset of (record signature, role) occurrences of each blank
-     * (other blanks masked) and are refined by re-signing with the current
-     * labels until they stabilize.
+     * Prepares the blank-node structure of a record set: the label-free shape
+     * of every record that references a blank, and the blank occurrences it
+     * holds. Refinement then reads only this, never the records.
+     *
+     * A blank identifier that no record references is the same thing as a null
+     * identifier (a serializer mints one for every anonymous record, and
+     * recordSignature() signs both as empty), so it is left out. A referenced
+     * one stays: its record's shape then flows into the label the references
+     * are compared by.
      *
      * @param list<\Prov\Model\ProvRecord> $records
+     */
+    private static function blankNodeGraph(array $records): BlankNodeGraph
+    {
+        $occurrencesByRecord = [];
+        $referenced = [];
+        foreach ($records as $i => $record) {
+            $found = self::collectBlankOccurrences($record);
+            if ($found === []) {
+                continue;
+            }
+            $occurrencesByRecord[$i] = $found;
+            foreach ($found as [$role, $uri]) {
+                if ($role !== BlankNodes::ID_ROLE) {
+                    $referenced[$uri] = true;
+                }
+            }
+        }
+
+        $shapes = [];
+        $occurrences = [];
+        foreach ($occurrencesByRecord as $i => $found) {
+            $kept = [];
+            foreach ($found as $occurrence) {
+                if ($occurrence[0] !== BlankNodes::ID_ROLE || isset($referenced[$occurrence[1]])) {
+                    $kept[] = $occurrence;
+                }
+            }
+            if ($kept === []) {
+                continue;
+            }
+            $shapes[] = self::recordSignature($records[$i], []);
+            $occurrences[] = $kept;
+        }
+        return new BlankNodeGraph($shapes, $occurrences);
+    }
+
+    /**
+     * Whether one label covers more than one linked blank node, which is what
+     * makes the signature comparison inconclusive. Unlinked blanks that share
+     * a label are interchangeable, so they never call for a search.
+     *
+     * @param array<string, string> $labels
+     */
+    private static function hasAmbiguousLinkedBlanks(array $labels, BlankNodeGraph $graph): bool
+    {
+        $seen = [];
+        foreach ($labels as $uri => $label) {
+            if (!$graph->isLinked($uri)) {
+                continue;
+            }
+            if (isset($seen[$label])) {
+                return true;
+            }
+            $seen[$label] = true;
+        }
+        return false;
+    }
+
+    /**
+     * Whether some renaming of the first set's blank nodes onto the second
+     * set's makes their record multisets equal.
+     *
+     * Refinement partitions the blanks; where it leaves a class of linked
+     * blanks with more than one member, one blank of that class is singled out
+     * and tried against each candidate on the other side, refining again after
+     * each choice. A branch whose refined signature multisets no longer match
+     * is cut immediately, so the search only widens where the graph really is
+     * symmetric. Once every linked class holds one blank the renaming is fixed
+     * (unlinked blanks pair off within their class in any order) and the exact
+     * record multisets are compared under it.
+     *
+     * @param list<\Prov\Model\ProvRecord> $setA
+     * @param list<\Prov\Model\ProvRecord> $setB
+     * @param array<string, string> $labelsA
+     * @param array<string, string> $labelsB
+     * @param int $budget
+     *   Branches left to explore. Drops below zero when the search gives up.
+     */
+    private static function blankBijectionExists(
+        array $setA,
+        array $setB,
+        BlankNodeGraph $graphA,
+        BlankNodeGraph $graphB,
+        array $labelsA,
+        array $labelsB,
+        int &$budget,
+    ): bool {
+        $classesA = self::groupByLabel($labelsA);
+        $classesB = self::groupByLabel($labelsB);
+        if (count($classesA) !== count($classesB)) {
+            return false;
+        }
+
+        // A label never covers both linked and unlinked blanks (the shape
+        // records how many distinct blanks a record holds), so one member
+        // speaks for its class.
+        $ambiguous = null;
+        foreach ($classesA as $label => $members) {
+            $other = $classesB[$label] ?? null;
+            if ($other === null || count($other) !== count($members)) {
+                return false;
+            }
+            if (
+                count($members) > 1
+                && $graphA->isLinked($members[0])
+                && ($ambiguous === null || count($members) < count($classesA[$ambiguous]))
+            ) {
+                $ambiguous = $label;
+            }
+        }
+
+        if ($ambiguous === null) {
+            $renaming = [];
+            foreach ($classesA as $label => $members) {
+                foreach ($members as $i => $uri) {
+                    $renaming[$uri] = $classesB[$label][$i];
+                }
+            }
+            return self::matchesUnderRenaming($setA, $setB, $renaming);
+        }
+
+        $fixed = $classesA[$ambiguous][0];
+        foreach ($classesB[$ambiguous] as $candidate) {
+            if (--$budget < 0) {
+                return false;
+            }
+            $nextA = $graphA->refine(self::individualize($labelsA, $fixed));
+            $nextB = $graphB->refine(self::individualize($labelsB, $candidate));
+            if ($graphA->signatureMultiset($nextA) !== $graphB->signatureMultiset($nextB)) {
+                continue;
+            }
+            if (self::blankBijectionExists($setA, $setB, $graphA, $graphB, $nextA, $nextB, $budget)) {
+                return true;
+            }
+            if ($budget < 0) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Gives one blank node a label of its own, so the next refinement round
+     * can propagate the choice through its neighborhood.
+     *
+     * @param array<string, string> $labels
      *
      * @return array<string, string>
      */
-    private static function canonicalBlankLabels(array $records): array
+    private static function individualize(array $labels, string $uri): array
     {
-        $blankRecords = [];
-        foreach ($records as $record) {
-            if (self::collectBlankOccurrences($record) !== []) {
-                $blankRecords[] = $record;
-            }
-        }
-        if ($blankRecords === []) {
-            return [];
-        }
-
-        $labels = [];
-        // Two extra rounds propagate a blank's neighborhood through shared
-        // records; further refinement changes labels only in contrived graphs.
-        for ($round = 0; $round < 3; $round++) {
-            $descriptors = [];
-            foreach ($blankRecords as $record) {
-                $sig = self::recordSignature($record, $labels);
-                foreach (self::collectBlankOccurrences($record) as [$role, $uri]) {
-                    $descriptors[$uri][] = $sig . '@' . $role;
-                }
-            }
-            $newLabels = [];
-            foreach ($descriptors as $uri => $descs) {
-                sort($descs);
-                $newLabels[$uri] = '_:' . md5(implode("\x1f", $descs));
-            }
-            if ($newLabels === $labels) {
-                break;
-            }
-            $labels = $newLabels;
-        }
-
+        $labels[$uri] = ($labels[$uri] ?? '') . "\x00fixed";
         return $labels;
     }
 
     /**
-     * Lists each blank-node occurrence in a record as a [role, blank URI] pair.
-     * Roles are order-independent (property names, attribute key URIs) because
-     * record and attribute ordering must not influence canonical labels.
+     * Groups blank-node URIs by label, each group in a stable order.
+     *
+     * @param array<string, string> $labels
+     *
+     * @return array<string, list<string>>
+     */
+    private static function groupByLabel(array $labels): array
+    {
+        $groups = [];
+        foreach ($labels as $uri => $label) {
+            $groups[$label][] = $uri;
+        }
+        foreach ($groups as &$members) {
+            sort($members);
+        }
+        unset($members);
+        ksort($groups);
+        return $groups;
+    }
+
+    /**
+     * Whether the two record multisets are equal once the first set's blank
+     * labels are rewritten to the second set's under `$renaming`.
+     *
+     * @param list<\Prov\Model\ProvRecord> $setA
+     * @param list<\Prov\Model\ProvRecord> $setB
+     * @param array<string, string> $renaming
+     */
+    private static function matchesUnderRenaming(array $setA, array $setB, array $renaming): bool
+    {
+        $identity = [];
+        foreach ($renaming as $target) {
+            $identity[$target] = $target;
+        }
+        return self::signatureMultiset($setA, $renaming) === self::signatureMultiset($setB, $identity);
+    }
+
+    /**
+     * The record signatures under a blank labelling, with how often each one
+     * occurs, sorted by signature. Two record sets that hold the same records
+     * in any order produce the same array, so callers compare multisets and
+     * never record sequences.
+     *
+     * @param list<\Prov\Model\ProvRecord> $records
+     * @param array<string, string> $labels
+     *
+     * @return array<string, int>
+     */
+    private static function signatureMultiset(array $records, array $labels): array
+    {
+        $counts = [];
+        foreach (self::signatureCounts($records, $labels) as $sig => [$_, $count]) {
+            $counts[$sig] = $count;
+        }
+        ksort($counts);
+        return $counts;
+    }
+
+    /**
+     * Lists each blank-node occurrence in a record as a [role, blank URI] pair,
+     * from the shared traversal every blank-node consumer uses. `alternateOf`
+     * is symmetric in PROV-DM, so its two endpoints report one shared role;
+     * `formalSignature()` sorts that record's endpoints for the same reason,
+     * and the two have to agree or a blank's label would depend on which side
+     * of the relation it was written on.
      *
      * @return list<array{string, string}>
      */
     private static function collectBlankOccurrences(ProvRecord $record): array
     {
+        $symmetric = $record instanceof \Prov\Relation\Alternate;
         $out = [];
-        $id = $record->identifier;
-        if ($id !== null && $id->isBlank()) {
-            $out[] = ['id', $id->getUri()];
-        }
-
-        if ($record instanceof ProvRelation) {
-            // @mago-expect analysis:mixed-assignment
-            foreach (RelationMetadata::extractFormals($record) as $prop => $value) {
-                if ($value instanceof QualifiedName && $value->isBlank()) {
-                    $out[] = [$prop, $value->getUri()];
-                } elseif (is_array($value)) {
-                    // @mago-expect analysis:mixed-assignment
-                    foreach ($value as $item) {
-                        if (
-                            $item instanceof \Prov\Relation\Dictionary\DictionaryEntry
-                            && $item->entity !== null
-                            && $item->entity->isBlank()
-                        ) {
-                            $out[] = ['dict', $item->entity->getUri()];
-                        }
-                    }
-                }
+        foreach (BlankNodes::occurrences($record) as $occurrence) {
+            $role = $occurrence['role'];
+            if ($symmetric && ($role === 'alternate1' || $role === 'alternate2')) {
+                $role = 'alternate';
             }
+            $out[] = [$role, $occurrence['name']->getUri()];
         }
-
-        foreach ($record->attributes->all() as $keyUri => $values) {
-            foreach ($values as $value) {
-                if ($value instanceof QualifiedName && $value->isBlank()) {
-                    $out[] = ['attr:' . $keyUri, $value->getUri()];
-                }
-            }
-        }
-
         return $out;
     }
 
@@ -318,7 +511,7 @@ final class DocumentComparator
                 $parts[] = self::keyEntityPairsSignature($value, $blankLabels);
             } elseif (is_array($value) && $prop === 'removedKeys') {
                 /** @var list<QualifiedName|Literal|string|int|float|bool> $value */
-                $parts[] = self::removedKeysSignature($value);
+                $parts[] = self::removedKeysSignature($value, $blankLabels);
             } else {
                 $parts[] = '';
             }
@@ -370,7 +563,7 @@ final class DocumentComparator
         $sigs = [];
         foreach ($pairs as $pair) {
             $entitySig = $pair->entity !== null ? self::referenceUri($pair->entity, $blankLabels) : '';
-            $sigs[] = [self::keySignature($pair->key), $entitySig];
+            $sigs[] = [self::keySignature($pair->key, $blankLabels), $entitySig];
         }
         sort($sigs);
         return $sigs;
@@ -378,20 +571,29 @@ final class DocumentComparator
 
     /**
      * @param list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool> $keys
+     * @param array<string, string> $blankLabels
      *
      * @return list<string>
      */
-    private static function removedKeysSignature(array $keys): array
+    private static function removedKeysSignature(array $keys, array $blankLabels): array
     {
-        $sigs = array_map(self::keySignature(...), $keys);
+        $sigs = [];
+        foreach ($keys as $key) {
+            $sigs[] = self::keySignature($key, $blankLabels);
+        }
         sort($sigs);
         return $sigs;
     }
 
-    private static function keySignature(QualifiedName|Literal|string|int|float|bool|null $key): string
-    {
+    /**
+     * @param array<string, string> $blankLabels
+     */
+    private static function keySignature(
+        QualifiedName|Literal|string|int|float|bool|null $key,
+        array $blankLabels = [],
+    ): string {
         if ($key instanceof QualifiedName || $key instanceof Literal) {
-            return ValueIdentity::signature($key);
+            return ValueIdentity::signature($key, $blankLabels);
         }
         if (is_string($key)) {
             // Bare string keys default to xsd:string in PROV-DM. Sign them like a Literal

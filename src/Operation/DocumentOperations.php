@@ -12,6 +12,7 @@ use Prov\Exception\NamespaceException;
 use Prov\Exception\ProvException;
 use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
+use Prov\Model\BlankNodes;
 use Prov\Model\ProvRecord;
 use Prov\Relation\Dictionary\DictionaryEntry;
 use Prov\Relation\Mention;
@@ -111,7 +112,8 @@ final class DocumentOperations
         // Skip the rewrite entirely when every declaration matched its canonical
         // namespace (the common case).
         if ($remapped) {
-            $records = array_map(static fn(ProvRecord $r): ProvRecord => self::remapRecord($r, $byUri), $records);
+            $mapName = static fn(QualifiedName $qn): QualifiedName => self::remapQn($qn, $byUri);
+            $records = array_map(static fn(ProvRecord $r): ProvRecord => self::rebuildRecord($r, $mapName), $records);
         }
 
         return new Document(records: $records, bundles: [], namespaces: array_values($byUri));
@@ -162,54 +164,54 @@ final class DocumentOperations
     }
 
     /**
-     * Rebuilds a record so every QualifiedName it references uses the canonical
-     * namespace for that URI. Reconstructed via the constructor using named
-     * arguments (public readonly property names match the constructor
-     * parameters), so each record type is handled without a per-type branch.
+     * Rebuilds a record with every QualifiedName it references passed through
+     * `$mapName`. Reconstructed via the constructor using named arguments
+     * (public readonly property names match the constructor parameters), so each
+     * record type is handled without a per-type branch.
      *
-     * @param array<string, \Prov\Identifier\ProvNamespace> $byUri
+     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
      */
-    private static function remapRecord(ProvRecord $record, array $byUri): ProvRecord
+    private static function rebuildRecord(ProvRecord $record, callable $mapName): ProvRecord
     {
         /** @var array<string, mixed> $args */
         $args = [];
         // @mago-expect analysis:mixed-assignment
         foreach (get_object_vars($record) as $name => $value) {
-            $args[$name] = self::remapValue($value, $byUri);
+            $args[$name] = self::rebuildValue($value, $mapName);
         }
         try {
             $new = new \ReflectionClass($record)->newInstanceArgs($args);
         } catch (\ReflectionException $e) {
             // Every record's public property names match its constructor
             // parameters, so reconstruction by named argument cannot fail here.
-            throw new \LogicException('Could not rebuild record while flattening.', previous: $e);
+            throw new \LogicException('Could not rebuild record.', previous: $e);
         }
         assert($new instanceof ProvRecord);
         return $new;
     }
 
     /**
-     * Remaps any QualifiedName reachable from a record property value
+     * Rebuilds any QualifiedName reachable from a record property value
      * (identifiers, formal endpoints, attribute bags, dictionary entries).
      *
-     * @param array<string, \Prov\Identifier\ProvNamespace> $byUri
+     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
      */
-    private static function remapValue(mixed $value, array $byUri): mixed
+    private static function rebuildValue(mixed $value, callable $mapName): mixed
     {
         if ($value instanceof QualifiedName) {
-            return self::remapQn($value, $byUri);
+            return $mapName($value);
         }
         if ($value instanceof Attributes) {
-            return self::remapAttributes($value, $byUri);
+            return self::rebuildAttributes($value, $mapName);
         }
         if ($value instanceof DictionaryEntry) {
             return new DictionaryEntry(
-                self::remapDictKey($value->key, $byUri),
-                $value->entity !== null ? self::remapQn($value->entity, $byUri) : null,
+                self::rebuildDictKey($value->key, $mapName),
+                $value->entity !== null ? $mapName($value->entity) : null,
             );
         }
         if (is_array($value)) {
-            return array_map(static fn(mixed $item): mixed => self::remapValue($item, $byUri), $value);
+            return array_map(static fn(mixed $item): mixed => self::rebuildValue($item, $mapName), $value);
         }
         return $value;
     }
@@ -227,65 +229,65 @@ final class DocumentOperations
     }
 
     /**
-     * Remaps a dictionary entry key, preserving its declared value union.
+     * Rebuilds a dictionary entry key, preserving its declared value union.
      *
-     * @param array<string, \Prov\Identifier\ProvNamespace> $byUri
+     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
      */
-    private static function remapDictKey(
+    private static function rebuildDictKey(
         QualifiedName|Literal|string|int|float|bool|null $key,
-        array $byUri,
+        callable $mapName,
     ): QualifiedName|Literal|string|int|float|bool|null {
         if ($key instanceof QualifiedName) {
-            return self::remapQn($key, $byUri);
+            return $mapName($key);
         }
         if ($key instanceof Literal) {
-            return self::remapLiteral($key, $byUri);
+            return self::rebuildLiteral($key, $mapName);
         }
         return $key;
     }
 
     /**
-     * @param array<string, \Prov\Identifier\ProvNamespace> $byUri
+     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
      */
-    private static function remapAttributes(Attributes $attributes, array $byUri): Attributes
+    private static function rebuildAttributes(Attributes $attributes, callable $mapName): Attributes
     {
         if ($attributes->isEmpty()) {
             return $attributes;
         }
         $pairs = [];
         foreach ($attributes as $key => $value) {
-            $pairs[] = [self::remapQn($key, $byUri), self::remapAttrValue($value, $byUri)];
+            $pairs[] = [$mapName($key), self::rebuildAttrValue($value, $mapName)];
         }
         return Attributes::from($pairs);
     }
 
     /**
-     * Remaps an attribute value, preserving its declared value union.
+     * Rebuilds an attribute value, preserving its declared value union.
      *
-     * @param array<string, \Prov\Identifier\ProvNamespace> $byUri
+     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
      */
-    private static function remapAttrValue(
+    private static function rebuildAttrValue(
         QualifiedName|Literal|string|int|float|bool $value,
-        array $byUri,
+        callable $mapName,
     ): QualifiedName|Literal|string|int|float|bool {
         if ($value instanceof QualifiedName) {
-            return self::remapQn($value, $byUri);
+            return $mapName($value);
         }
         if ($value instanceof Literal) {
-            return self::remapLiteral($value, $byUri);
+            return self::rebuildLiteral($value, $mapName);
         }
         return $value;
     }
 
     /**
-     * @param array<string, \Prov\Identifier\ProvNamespace> $byUri
+     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
      */
-    private static function remapLiteral(Literal $literal, array $byUri): Literal
+    private static function rebuildLiteral(Literal $literal, callable $mapName): Literal
     {
         if ($literal->datatype === null) {
             return $literal;
         }
-        return new Literal($literal->value, self::remapQn($literal->datatype, $byUri), $literal->languageTag);
+        return new Literal($literal->value, $mapName($literal->datatype), $literal->languageTag);
     }
 
     /**
@@ -324,12 +326,20 @@ final class DocumentOperations
      * two bundles sharing a URI have their records concatenated and namespaces
      * reconciled.
      *
+     * A blank label names a record only inside its own document, so two
+     * independent documents commonly both use `_:b1` for unrelated records.
+     * Every label the two documents share is renamed in `$b` before the records
+     * are combined, in every position a blank reference can occur. A blank
+     * QualifiedName handed to both documents therefore ends up as two nodes in
+     * the result: cross-document blank identity is not part of the model.
+     *
      * @throws \Prov\Exception\NamespaceException
      *   If the two documents (or two bundles sharing an identifier) declare the
      *   same prefix with different URIs. Reconcile the prefixes before merging.
      */
     public static function merge(Document $a, Document $b): Document
     {
+        $b = self::standardizeBlankNodesApart($a, $b);
         $records = array_merge($a->records, $b->records);
 
         $bundlesByUri = [];
@@ -351,6 +361,66 @@ final class DocumentOperations
         $namespaces = self::mergeNamespaces($a->namespaces, $b->namespaces);
 
         return new Document(records: $records, bundles: $bundles, namespaces: $namespaces);
+    }
+
+    /**
+     * Returns `$b` with every blank label it shares with `$a` renamed to one
+     * neither document uses. Labels unique to `$b` are left alone, so the result
+     * stays readable and the records that did not collide keep their names.
+     */
+    private static function standardizeBlankNodesApart(Document $a, Document $b): Document
+    {
+        $usedInA = BlankNodes::labels(self::allRecords($a));
+        if ($usedInA === []) {
+            return $b;
+        }
+        $usedInB = BlankNodes::labels(self::allRecords($b));
+        $colliding = array_intersect_key($usedInB, $usedInA);
+        if ($colliding === []) {
+            return $b;
+        }
+
+        $taken = $usedInA + $usedInB;
+        /** @var array<string, \Prov\Identifier\QualifiedName> $renames */
+        $renames = [];
+        $next = 1;
+        foreach (array_keys($colliding) as $label) {
+            do {
+                $fresh = 'b' . $next++;
+            } while (isset($taken['_:' . $fresh]));
+            $taken['_:' . $fresh] = true;
+            $renames[$label] = QualifiedName::blankNode($fresh);
+        }
+
+        $mapName = static fn(QualifiedName $qn): QualifiedName => $renames[$qn->getUri()] ?? $qn;
+        $rebuild = static fn(ProvRecord $r): ProvRecord => self::rebuildRecord($r, $mapName);
+
+        $bundles = [];
+        foreach ($b->bundles as $bundle) {
+            $bundles[] = new Bundle(
+                identifier: $bundle->identifier,
+                records: array_map($rebuild, $bundle->records),
+                namespaces: $bundle->namespaces,
+            );
+        }
+
+        return new Document(records: array_map($rebuild, $b->records), bundles: $bundles, namespaces: $b->namespaces);
+    }
+
+    /**
+     * Every record a document holds, its bundles' records included.
+     *
+     * @return list<\Prov\Model\ProvRecord>
+     */
+    private static function allRecords(Document $document): array
+    {
+        $records = $document->records;
+        foreach ($document->bundles as $bundle) {
+            foreach ($bundle->records as $record) {
+                $records[] = $record;
+            }
+        }
+        return $records;
     }
 
     /**

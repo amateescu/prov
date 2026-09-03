@@ -5,11 +5,8 @@ declare(strict_types=1);
 namespace Prov\Serializer;
 
 use Prov\Document;
-use Prov\Identifier\QualifiedName;
+use Prov\Model\BlankNodes;
 use Prov\Model\ProvRecord;
-use Prov\Model\ProvRelation;
-use Prov\Model\RelationMetadata;
-use Prov\Relation\Dictionary\DictionaryEntry;
 
 /**
  * Mints a synthetic `_:bN` label for a record with no identifier. A format
@@ -18,12 +15,9 @@ use Prov\Relation\Dictionary\DictionaryEntry;
  *
  * Each record's label is cached, so a later reference to the same record
  * reuses it. Minting skips any `_:bN` label the document already uses,
- * wherever it appears: an identifier, a relation's formal endpoint or
- * dictionary entity, or an attribute value.
+ * wherever it appears.
  *
  * @internal
- *
- * @mago-ignore analysis:mixed-assignment
  */
 final class BlankLabelMinter
 {
@@ -65,48 +59,10 @@ final class BlankLabelMinter
      */
     private function collectUsedLabels(): array
     {
-        $labels = [];
         $records = $this->document->records;
         foreach ($this->document->bundles as $bundle) {
             $records = [...$records, ...$bundle->records];
         }
-        foreach ($records as $record) {
-            $id = $record->identifier;
-            if ($id !== null && str_starts_with($id->uri, '_:')) {
-                $labels[$id->uri] = true;
-            }
-            if ($record instanceof ProvRelation) {
-                foreach (RelationMetadata::extractFormals($record) as $value) {
-                    if ($value instanceof QualifiedName) {
-                        if (str_starts_with($value->uri, '_:')) {
-                            $labels[$value->uri] = true;
-                        }
-                    } elseif (is_array($value)) {
-                        $this->collectDictionaryLabels($value, $labels);
-                    }
-                }
-            }
-            foreach ($record->attributes->all() as $values) {
-                foreach ($values as $value) {
-                    if ($value instanceof QualifiedName && str_starts_with($value->uri, '_:')) {
-                        $labels[$value->getUri()] = true;
-                    }
-                }
-            }
-        }
-        return $labels;
-    }
-
-    /**
-     * @param array<array-key, mixed> $items
-     * @param array<string, bool> $labels
-     */
-    private function collectDictionaryLabels(array $items, array &$labels): void
-    {
-        foreach ($items as $item) {
-            if ($item instanceof DictionaryEntry && $item->entity !== null && $item->entity->isBlank()) {
-                $labels[$item->entity->getUri()] = true;
-            }
-        }
+        return BlankNodes::labels($records);
     }
 }

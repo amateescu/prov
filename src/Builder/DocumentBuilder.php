@@ -8,8 +8,7 @@ use Prov\Bundle;
 use Prov\Document;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\QualifiedName;
-use Prov\Model\ProvRelation;
-use Prov\Model\RelationMetadata;
+use Prov\Model\BlankNodes;
 
 /**
  * Fluent builder for assembling a Document: add records (entities,
@@ -115,35 +114,29 @@ class DocumentBuilder extends RecordBuilder
 
     /**
      * Returns the highest numeric suffix among the `_:bN` labels these records
-     * use, whether through a record's own identifier or (for a relation) a
-     * formal endpoint or dictionary-entry entity. Zero if none use one.
+     * use, in any position a blank reference can occupy. Zero if none use one.
      *
      * @param list<\Prov\Model\ProvRecord> $records
      */
     private function maxBlankNodeNumber(array $records): int
     {
         $max = 0;
-        foreach ($records as $record) {
-            $max = max($max, $this->blankNodeNumber($record->identifier));
-            if ($record instanceof ProvRelation) {
-                foreach (RelationMetadata::refEndpoints($record) as $endpoint) {
-                    $max = max($max, $this->blankNodeNumber($endpoint));
-                }
-            }
+        foreach (array_keys(BlankNodes::labels($records)) as $label) {
+            $max = max($max, $this->blankNodeNumber($label));
         }
         return $max;
     }
 
     /**
-     * The numeric suffix of a `_:bN` blank-node identifier, or 0 for anything
-     * else (a named identifier, null, or a non-numeric blank label).
+     * The numeric suffix of a `_:bN` blank-node label, or 0 for anything else
+     * (a non-numeric blank label).
      */
-    private function blankNodeNumber(?QualifiedName $id): int
+    private function blankNodeNumber(string $label): int
     {
-        if ($id === null || !str_starts_with($id->uri, '_:b')) {
+        if (!str_starts_with($label, '_:b')) {
             return 0;
         }
-        $suffix = substr($id->uri, strlen('_:b'));
+        $suffix = substr($label, strlen('_:b'));
         return ctype_digit($suffix) ? (int) $suffix : 0;
     }
 
