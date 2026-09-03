@@ -332,6 +332,34 @@ final class JsonScannerTest extends TestCase
         $this->assertTrue(new JsonScanner($json)->isQualifiedNameValue($reference));
     }
 
+    public function testResolveReferenceAcceptsBothWrittenForms(): void
+    {
+        $scanner = new JsonScanner('{"prefix":{"ex":"http://example.org/"},"entity":{"ex:e1":{}}}');
+
+        // The bare string and the typed map name the same thing.
+        $this->assertSame('http://example.org/e1', $scanner->resolveReference('ex:e1')?->getUri());
+        $this->assertSame(
+            'http://example.org/e1',
+            $scanner->resolveReference(['$' => 'ex:e1', 'type' => 'prov:QUALIFIED_NAME'])?->getUri(),
+        );
+
+        // The tag is not checked, so a literal whose text reads like an
+        // identifier resolves too. Callers at positions where a literal is
+        // allowed ask isQualifiedNameValue() first.
+        $this->assertSame(
+            'http://example.org/e1',
+            $scanner->resolveReference(['$' => 'ex:e1', 'type' => 'xsd:string'])?->getUri(),
+        );
+        $this->assertFalse($scanner->isQualifiedNameValue(['$' => 'ex:e1', 'type' => 'xsd:string']));
+
+        // A value that is not a reference, and one the document cannot resolve.
+        $this->assertNull($scanner->resolveReference(['type' => 'prov:QUALIFIED_NAME']));
+        $this->assertNull($scanner->resolveReference(['$' => 5]));
+        $this->assertNull($scanner->resolveReference(5));
+        $this->assertNull($scanner->resolveReference(null));
+        $this->assertNull($scanner->resolveReference('nosuch:e1'));
+    }
+
     public function testHadMemberEntityListReportsEveryMember(): void
     {
         // PROV-JSON lets hadMember carry several entities under one prov:entity

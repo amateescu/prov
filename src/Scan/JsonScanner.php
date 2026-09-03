@@ -186,6 +186,35 @@ final class JsonScanner
     }
 
     /**
+     * Resolves a value that names a record, whichever way it is written.
+     *
+     * PROV-JSON writes a reference either as a bare `prefix:local` string or as
+     * the `{"$": "prefix:local", "type": "prov:QUALIFIED_NAME"}` map a typed
+     * value takes, and a reader has to accept both. The tag is not checked, so
+     * use this where a reference is the only thing allowed: a relation
+     * endpoint, or a record id read back from `ids()`. Where a literal is also
+     * allowed, ask `isQualifiedNameValue()` first, because a literal whose text
+     * reads like an identifier is still a literal.
+     *
+     * Returns null for a value that is not a reference at all, and for one
+     * whose prefix the document never declared.
+     *
+     * @param mixed $value
+     *   One decoded PROV-JSON value: a scalar, or the `{"$": ..., "type": ...}`
+     *   map a typed value is written as.
+     */
+    public function resolveReference(mixed $value): ?QualifiedName
+    {
+        $shorthand = match (true) {
+            is_string($value) => $value,
+            is_array($value) && is_string($value['$'] ?? null) => $value['$'],
+            default => null,
+        };
+
+        return $shorthand === null ? null : $this->tryResolve($shorthand);
+    }
+
+    /**
      * The ids of a section, as they appear in the document, in document order.
      * Works for `entity`, `activity`, `agent`, and any relation section name.
      * An absent section yields an empty list.
