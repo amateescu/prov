@@ -50,7 +50,9 @@ final class OutputOrderingTest extends TestCase
             }
         }
 
-        $this->assertSame(['prov', 'xsd', 'alpha', 'zeta'], $prefixes);
+        // PROV-N binds prov and xsd implicitly and forbids redeclaring them, so
+        // only the caller's own declarations appear, still ordered by prefix.
+        $this->assertSame(['alpha', 'zeta'], $prefixes);
     }
 
     public function testRecordsKeepInsertionOrderByDefault(): void

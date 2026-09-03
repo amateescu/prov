@@ -183,7 +183,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
     private function parsePrefix(NamespaceManager $nsManager): void
     {
         $this->skip();
-        $prefix = $this->readWord();
+        $prefix = $this->readPrefixToken();
         $this->skip();
         $uri = $this->readIri();
         if ($prefix === '' || $uri === '') {
@@ -1053,6 +1053,24 @@ class ProvNDeserializer implements ProvDeserializerInterface
         $s = $this->pos;
         $this->pos += $len;
         return substr($this->input, $s, $len);
+    }
+
+    /**
+     * Reads a namespace prefix token. PN_PREFIX draws on the same Unicode
+     * letters a local name does, so a non-ASCII byte extends the token the way
+     * readQName() treats it, rather than cutting it short.
+     */
+    private function readPrefixToken(): string
+    {
+        $start = $this->pos;
+        while ($this->pos < $this->len) {
+            $this->pos += strspn($this->input, self::WORD_CHARS_EXT, $this->pos);
+            if ($this->pos >= $this->len || ord($this->input[$this->pos]) <= 127) {
+                break;
+            }
+            $this->pos++;
+        }
+        return substr($this->input, $start, $this->pos - $start);
     }
 
     private function readQName(): string

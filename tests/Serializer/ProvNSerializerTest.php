@@ -44,7 +44,9 @@ final class ProvNSerializerTest extends TestCase
         $output = $this->serializer->serialize($doc);
 
         $this->assertStringContainsString('prefix ex <http://example.org/>', $output);
-        $this->assertStringContainsString('prefix prov <http://www.w3.org/ns/prov#>', $output);
+        // PROV-N declares prov and xsd implicitly and forbids redeclaring them.
+        $this->assertStringNotContainsString('prefix prov ', $output);
+        $this->assertStringContainsString('prov:label', $output);
     }
 
     public function testDefaultNamespaceDeclaration(): void

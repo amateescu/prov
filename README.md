@@ -82,7 +82,9 @@ $json = new JsonSerializer(sortRecords: true)->serialize($doc);
 
 The PROV-N parser accepts two convenience extensions beyond the published grammar, so input that parses here is not necessarily canonical PROV-N: line (`//`) and block (`/* */`) comments, and optional commas between a relation's arguments. Output always uses the canonical form.
 
-PROV-N has no slot for an explicit identifier on `specializationOf`, `alternateOf`, `hadMember`, or `mentionOf`. When a document carries one of these relations *with* an identifier (legal in PROV-JSON/PROV-XML), the PROV-N serializer drops the identifier, since the grammar cannot express it. `DocumentComparator::equals()` will flag the difference on a JSON-to-PROV-N-to-JSON round trip; keep such relations in PROV-JSON or PROV-XML if their identifiers matter.
+PROV-N has no slot for an explicit identifier on `specializationOf`, `alternateOf`, `hadMember`, or `mentionOf`, and `hadDictionaryMember` has room for neither an identifier nor attributes. When a document carries one of these relations *with* an identifier (legal in PROV-JSON/PROV-XML), the PROV-N serializer drops the identifier, since the grammar cannot express it. `DocumentComparator::equals()` will flag the difference on a JSON-to-PROV-N-to-JSON round trip; keep such relations in PROV-JSON or PROV-XML if their identifiers matter.
+
+The `prov` and `xsd` prefixes are implicit in PROV-N and the grammar forbids redeclaring them, so the serializer never writes those declarations and refuses a document that binds either prefix to another namespace. Rename the prefix first. Every other prefix is checked against the `PN_PREFIX` production before it is written, Unicode included, so a prefix that starts with a digit or ends in a dot is refused rather than emitted as unparseable text.
 
 ## Document operations
 

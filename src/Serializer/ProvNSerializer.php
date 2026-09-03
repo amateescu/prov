@@ -8,10 +8,12 @@ use Prov\Activity;
 use Prov\Agent;
 use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
+use Prov\Attribute\ValueIdentity;
 use Prov\Bundle;
 use Prov\Document;
 use Prov\Entity;
 use Prov\Identifier\NamespaceManager;
+use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\ProvRecord;
 use Prov\Model\ProvRelation;
@@ -45,7 +47,7 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private readonly string $indentPrefix;
 
-    private ?PrefixMinter $minter = null;
+    private PrefixMinter $minter;
 
     public function __construct(
         public readonly int $indentation = 2,
@@ -56,6 +58,7 @@ class ProvNSerializer implements ProvSerializerInterface
             throw new \InvalidArgumentException('Indentation must be a non-negative number of spaces.');
         }
         $this->indentPrefix = str_repeat(' ', $this->indentation);
+        $this->minter = new PrefixMinter(new NamespaceManager());
     }
 
     /**
@@ -90,18 +93,9 @@ class ProvNSerializer implements ProvSerializerInterface
         $lines[] = 'document';
 
         $namespaces = OutputOrder::namespaces([...$document->namespaces, ...$minter->getMintedNamespaces()]);
-        foreach ($namespaces as $ns) {
-            $this->assertSafeNamespace($ns);
-            if ($ns->prefix === 'default') {
-                if ($this->includeDefaultNamespace) {
-                    $lines[] = $indent . "default <{$ns->uri}>";
-                }
-            } else {
-                $lines[] = $indent . "prefix {$ns->prefix} <{$ns->uri}>";
-            }
-        }
-
-        if ($namespaces !== []) {
+        $declarations = $this->namespaceDeclarations($namespaces, $indent);
+        if ($declarations !== []) {
+            $lines = array_merge($lines, $declarations);
             $lines[] = '';
         }
 
@@ -118,20 +112,11 @@ class ProvNSerializer implements ProvSerializerInterface
 
         $indent = $this->indentPrefix;
         $indent2 = $indent . $indent;
-        $lines[] = $indent . 'bundle ' . $this->formatQualifiedName($bundle->identifier);
+        $lines[] = $indent . 'bundle ' . $this->formatQualifiedName($bundle->identifier, $parentNsManager);
 
-        foreach (OutputOrder::namespaces($bundle->namespaces) as $ns) {
-            $this->assertSafeNamespace($ns);
-            if ($ns->prefix === 'default') {
-                if ($this->includeDefaultNamespace) {
-                    $lines[] = $indent2 . "default <{$ns->uri}>";
-                }
-            } else {
-                $lines[] = $indent2 . "prefix {$ns->prefix} <{$ns->uri}>";
-            }
-        }
-
-        if ($bundle->namespaces !== []) {
+        $declarations = $this->namespaceDeclarations(OutputOrder::namespaces($bundle->namespaces), $indent2);
+        if ($declarations !== []) {
+            $lines = array_merge($lines, $declarations);
             $lines[] = '';
         }
 
@@ -146,13 +131,61 @@ class ProvNSerializer implements ProvSerializerInterface
         $lines[] = $indent . 'endBundle';
     }
 
+    /**
+     * The `prefix`/`default` declaration lines for a document or bundle block.
+     *
+     * PROV-N declares `prov` and `xsd` itself and forbids redeclaring them, so
+     * a canonical binding for either is checked and then left out. Every other
+     * declaration is validated and written.
+     *
+     * @param list<\Prov\Identifier\ProvNamespace> $namespaces
+     *
+     * @return list<string>
+     */
+    private function namespaceDeclarations(array $namespaces, string $indent): array
+    {
+        $lines = [];
+        foreach ($namespaces as $ns) {
+            $this->assertSafeNamespace($ns);
+            if (self::isImplicitNamespace($ns)) {
+                continue;
+            }
+            if ($ns->prefix === 'default') {
+                if ($this->includeDefaultNamespace) {
+                    $lines[] = $indent . "default <{$ns->uri}>";
+                }
+            } else {
+                $lines[] = $indent . "prefix {$ns->prefix} <{$ns->uri}>";
+            }
+        }
+        return $lines;
+    }
+
+    /**
+     * Whether a namespace is one of the two PROV-N declares implicitly, bound
+     * to its canonical URI.
+     */
+    private static function isImplicitNamespace(ProvNamespace $ns): bool
+    {
+        if ($ns->prefix === 'prov') {
+            return $ns->uri === ProvNamespace::prov()->uri;
+        }
+        if ($ns->prefix === 'xsd') {
+            // PROV-XML declares the XSD namespace without the trailing '#' and
+            // PROV-JSON declares it with one. Both name the namespace PROV-N
+            // binds to `xsd` implicitly.
+            return ValueIdentity::normalizeDatatypeUri($ns->uri) === ProvNamespace::xsd()->uri;
+        }
+        return false;
+    }
+
     private function serializeRecord(ProvRecord $record, NamespaceManager $nsManager): ?string
     {
         return match (true) {
             $record instanceof Entity => $this->serializeEntity($record, $nsManager),
             $record instanceof Activity => $this->serializeActivity($record, $nsManager),
             $record instanceof Agent => $this->serializeAgent($record, $nsManager),
-            $record instanceof DictionaryMembership => $this->serializeDictMembership($record),
+            $record instanceof DictionaryMembership => $this->serializeDictMembership($record, $nsManager),
             $record instanceof DictionaryInsertion => $this->serializeDictInsertion($record, $nsManager),
             $record instanceof DictionaryRemoval => $this->serializeDictRemoval($record, $nsManager),
             $record instanceof ProvRelation && isset(RelationMetadata::FORMALS[$record::class])
@@ -163,7 +196,7 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeEntity(Entity $entity, NamespaceManager $nsManager): string
     {
-        $id = $this->formatOptionalId($entity->identifier);
+        $id = $this->formatOptionalId($entity->identifier, $nsManager);
         if ($entity->attributes->isEmpty()) {
             return "entity({$id})";
         }
@@ -172,7 +205,7 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeActivity(Activity $activity, NamespaceManager $nsManager): string
     {
-        $id = $this->formatOptionalId($activity->identifier);
+        $id = $this->formatOptionalId($activity->identifier, $nsManager);
         $time = '';
         if ($activity->startTime !== null || $activity->endTime !== null) {
             $start = $activity->startTime !== null ? Literal::formatDateTime($activity->startTime) : '-';
@@ -187,7 +220,7 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeAgent(Agent $agent, NamespaceManager $nsManager): string
     {
-        $id = $this->formatOptionalId($agent->identifier);
+        $id = $this->formatOptionalId($agent->identifier, $nsManager);
         if ($agent->attributes->isEmpty()) {
             return "agent({$id})";
         }
@@ -211,7 +244,7 @@ class ProvNSerializer implements ProvSerializerInterface
             // @mago-expect analysis:mixed-assignment
             $value = $formals[$prop];
             if ($type === 'ref') {
-                $parts[] = $this->formatOptionalId($value instanceof QualifiedName ? $value : null);
+                $parts[] = $this->formatOptionalId($value instanceof QualifiedName ? $value : null, $nsManager);
             } elseif ($type === 'time') {
                 $parts[] = $value instanceof \DateTimeImmutable ? Literal::formatDateTime($value) : '-';
             }
@@ -220,7 +253,7 @@ class ProvNSerializer implements ProvSerializerInterface
 
         $identifier = isset(self::RELATIONS_WITHOUT_ID[$record::class]) ? null : $record->identifier;
         $prefix = $identifier !== null
-            ? $keyword . '(' . $this->formatQualifiedName($identifier) . '; ' . $args
+            ? $keyword . '(' . $this->formatQualifiedName($identifier, $nsManager) . '; ' . $args
             : $keyword . '(' . $args;
 
         return $record->attributes->isEmpty()
@@ -228,13 +261,13 @@ class ProvNSerializer implements ProvSerializerInterface
             : $prefix . $this->formatAttributes($record->attributes, $nsManager) . ')';
     }
 
-    private function serializeDictMembership(DictionaryMembership $dm): string
+    private function serializeDictMembership(DictionaryMembership $dm, NamespaceManager $nsManager): string
     {
         $lines = [];
         foreach ($dm->keyEntityPairs as $pair) {
-            $dict = $this->formatOptionalId($dm->dictionary);
-            $entity = $this->formatOptionalId($pair->entity);
-            $key = $this->formatDictKey($pair->key);
+            $dict = $this->formatOptionalId($dm->dictionary, $nsManager);
+            $entity = $this->formatOptionalId($pair->entity, $nsManager);
+            $key = $this->formatDictKey($pair->key, $nsManager);
             $lines[] = "prov:hadDictionaryMember({$dict}, {$entity}, {$key})";
         }
         return implode("\n" . $this->indentPrefix, $lines);
@@ -242,15 +275,15 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeDictInsertion(DictionaryInsertion $di, NamespaceManager $nsManager): string
     {
-        $after = $this->formatOptionalId($di->after);
-        $before = $this->formatOptionalId($di->before);
-        $set = $this->formatKeyEntitySet($di->keyEntityPairs);
+        $after = $this->formatOptionalId($di->after, $nsManager);
+        $before = $this->formatOptionalId($di->before, $nsManager);
+        $set = $this->formatKeyEntitySet($di->keyEntityPairs, $nsManager);
         $attrs = $this->formatAttributes($di->attributes, $nsManager);
 
         if ($di->identifier !== null) {
             return (
                 'prov:derivedByInsertionFrom('
-                . $this->formatQualifiedName($di->identifier)
+                . $this->formatQualifiedName($di->identifier, $nsManager)
                 . "; {$after}, {$before}, {$set}{$attrs})"
             );
         }
@@ -259,15 +292,15 @@ class ProvNSerializer implements ProvSerializerInterface
 
     private function serializeDictRemoval(DictionaryRemoval $dr, NamespaceManager $nsManager): string
     {
-        $after = $this->formatOptionalId($dr->after);
-        $before = $this->formatOptionalId($dr->before);
-        $set = $this->formatKeySet($dr->removedKeys);
+        $after = $this->formatOptionalId($dr->after, $nsManager);
+        $before = $this->formatOptionalId($dr->before, $nsManager);
+        $set = $this->formatKeySet($dr->removedKeys, $nsManager);
         $attrs = $this->formatAttributes($dr->attributes, $nsManager);
 
         if ($dr->identifier !== null) {
             return (
                 'prov:derivedByRemovalFrom('
-                . $this->formatQualifiedName($dr->identifier)
+                . $this->formatQualifiedName($dr->identifier, $nsManager)
                 . "; {$after}, {$before}, {$set}{$attrs})"
             );
         }
@@ -280,15 +313,15 @@ class ProvNSerializer implements ProvSerializerInterface
      *
      * @param list<\Prov\Relation\Dictionary\DictionaryEntry> $pairs
      */
-    private function formatKeyEntitySet(array $pairs): string
+    private function formatKeyEntitySet(array $pairs, NamespaceManager $nsManager): string
     {
         if ($pairs === []) {
             return '{}';
         }
         $items = [];
         foreach ($pairs as $pair) {
-            $key = $this->formatDictKey($pair->key);
-            $entity = $this->formatOptionalId($pair->entity);
+            $key = $this->formatDictKey($pair->key, $nsManager);
+            $entity = $this->formatOptionalId($pair->entity, $nsManager);
             $items[] = "({$key}, {$entity})";
         }
         return '{' . implode(', ', $items) . '}';
@@ -300,14 +333,14 @@ class ProvNSerializer implements ProvSerializerInterface
      *
      * @param list<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool> $keys
      */
-    private function formatKeySet(array $keys): string
+    private function formatKeySet(array $keys, NamespaceManager $nsManager): string
     {
         if ($keys === []) {
             return '{}';
         }
         $items = [];
         foreach ($keys as $key) {
-            $items[] = $this->formatDictKey($key);
+            $items[] = $this->formatDictKey($key, $nsManager);
         }
         return '{' . implode(', ', $items) . '}';
     }
@@ -316,46 +349,29 @@ class ProvNSerializer implements ProvSerializerInterface
      * Formats the full `DictionaryEntry::$key` union (QN/Literal/scalar/null)
      * as a PROV-N token.
      */
-    private function formatDictKey(QualifiedName|Literal|string|int|float|bool|null $key): string
-    {
+    private function formatDictKey(
+        QualifiedName|Literal|string|int|float|bool|null $key,
+        NamespaceManager $nsManager,
+    ): string {
         if ($key === null) {
             return '-';
         }
-        return $this->formatAttributeValue($key);
+        return $this->formatAttributeValue($key, $nsManager);
     }
 
     /**
      * Stringifies an identifier for emission, escaping the local-name punctuation
      * the grammar permits when backslash-escaped and rejecting any character that
      * remains unrepresentable. This is the single chokepoint through which every
-     * qualified name reaches the output, so validation happens inline as the
-     * document is written (no separate pass).
+     * qualified name reaches the output, so local-name validation happens inline
+     * as the document is written (no separate pass). The prefix needs no check
+     * here: every prefix the minter hands out is declared in a header block,
+     * and namespaceDeclarations() validates each declaration before the
+     * document is returned.
      */
-    private function formatQualifiedName(QualifiedName $qn): string
+    private function formatQualifiedName(QualifiedName $qn, NamespaceManager $nsManager): string
     {
-        $local = $this->escapeLocalPart($qn->localPart);
-
-        // A default-namespace name is written bare; a blank-node label keeps its
-        // reserved "_" prefix. Neither needs (or can take) a declaration.
-        if ($qn->namespace->prefix === 'default') {
-            return $local;
-        }
-        if ($qn->isBlank()) {
-            return $qn->namespace->prefix . ':' . $local;
-        }
-
-        // Route through the minter so an otherwise-undeclared namespace gets a
-        // declaration emitted in the header, keeping the output parseable.
-        $prefix = $this->minter !== null ? $this->minter->prefixFor($qn) : $qn->namespace->prefix;
-
-        // PN_PREFIX has no escape mechanism, so an unsafe prefix is unrepresentable.
-        if ($this->hasUnsafeChars($prefix)) {
-            throw new \InvalidArgumentException(
-                "Identifier '{$qn}' has a prefix that cannot be represented in PROV-N.",
-            );
-        }
-
-        return $prefix . ':' . $local;
+        return $this->minter->token($qn, $nsManager, $this->escapeLocalPart($qn->localPart));
     }
 
     /**
@@ -388,9 +404,9 @@ class ProvNSerializer implements ProvSerializerInterface
         return substr($key, 0, $colon + 1) . $this->escapeLocalPart(substr($key, $colon + 1));
     }
 
-    private function formatOptionalId(?QualifiedName $id): string
+    private function formatOptionalId(?QualifiedName $id, NamespaceManager $nsManager): string
     {
-        return $id !== null ? $this->formatQualifiedName($id) : '-';
+        return $id !== null ? $this->formatQualifiedName($id, $nsManager) : '-';
     }
 
     private function formatAttributes(Attributes $attributes, NamespaceManager $nsManager): string
@@ -401,14 +417,12 @@ class ProvNSerializer implements ProvSerializerInterface
 
         $pairs = [];
         foreach ($attributes->all() as $uri => $values) {
-            $key = $this->minter !== null
-                ? $this->minter->uriToPrefixed($uri, $nsManager)
-                : $nsManager->uriToPrefixed($uri);
+            $key = $this->minter->uriToPrefixed($uri, $nsManager);
             $key = NamespaceManager::stripDefaultSentinel($key);
             $key = $this->escapeAttributeKey($key);
             $this->assertSafeAttributeKey($key);
             foreach ($values as $value) {
-                $formattedValue = $this->formatAttributeValue($value);
+                $formattedValue = $this->formatAttributeValue($value, $nsManager);
                 $pairs[] = "{$key} = {$formattedValue}";
             }
         }
@@ -416,16 +430,18 @@ class ProvNSerializer implements ProvSerializerInterface
         return ', [' . implode(', ', $pairs) . ']';
     }
 
-    private function formatAttributeValue(QualifiedName|Literal|string|int|float|bool $value): string
-    {
+    private function formatAttributeValue(
+        QualifiedName|Literal|string|int|float|bool $value,
+        NamespaceManager $nsManager,
+    ): string {
         if ($value instanceof QualifiedName) {
-            return "'" . $this->formatQualifiedName($value) . "'";
+            return "'" . $this->formatQualifiedName($value, $nsManager) . "'";
         }
 
         if ($value instanceof Literal) {
             $str = '"' . $this->escapeString($value->value) . '"';
             if ($value->datatype !== null) {
-                $str .= ' %% ' . $this->formatQualifiedName($value->datatype);
+                $str .= ' %% ' . $this->formatQualifiedName($value->datatype, $nsManager);
             }
             if ($value->languageTag !== null) {
                 $this->assertSafeLangTag($value->languageTag);
@@ -457,14 +473,51 @@ class ProvNSerializer implements ProvSerializerInterface
      */
     private const string PROVN_UNSAFE_PUNCTUATION = "()[]{}<>\"'=,;:|^`\\";
 
-    private function assertSafeNamespace(\Prov\Identifier\ProvNamespace $ns): void
+    private function assertSafeNamespace(ProvNamespace $ns): void
     {
-        if ($ns->prefix !== 'default' && $this->hasUnsafeChars($ns->prefix)) {
-            throw new \InvalidArgumentException("Namespace prefix '{$ns->prefix}' cannot be represented in PROV-N.");
+        if ($ns->prefix !== 'default') {
+            if (($ns->prefix === 'prov' || $ns->prefix === 'xsd') && !self::isImplicitNamespace($ns)) {
+                throw new \InvalidArgumentException(
+                    "PROV-N declares the prefix '{$ns->prefix}' implicitly and forbids redeclaring it, "
+                    . "so it cannot be bound to '{$ns->uri}'. Rename the prefix before serializing.",
+                );
+            }
+            if (!self::isValidPrefix($ns->prefix)) {
+                throw new \InvalidArgumentException(
+                    "Namespace prefix '{$ns->prefix}' cannot be represented in PROV-N.",
+                );
+            }
         }
         if ($this->isUnsafeUri($ns->uri)) {
             throw new \InvalidArgumentException("Namespace URI '{$ns->uri}' cannot be represented in PROV-N.");
         }
+    }
+
+    /**
+     * Whether a string matches the PROV-N `PN_PREFIX` production: a name
+     * character that is not a digit, hyphen, or underscore, then any run of
+     * name characters and dots that does not end on a dot. The character
+     * classes are the Unicode ranges the grammar lists, so a non-ASCII prefix
+     * is accepted exactly where the grammar accepts it. Checked once per
+     * declaration; every prefix written in the body is declared, so that
+     * covers the body too.
+     */
+    private static function isValidPrefix(string $prefix): bool
+    {
+        static $pattern = null;
+        if ($pattern === null) {
+            $base =
+                'A-Za-z'
+                . '\x{00C0}-\x{00D6}\x{00D8}-\x{00F6}\x{00F8}-\x{02FF}'
+                . '\x{0370}-\x{037D}\x{037F}-\x{1FFF}\x{200C}-\x{200D}'
+                . '\x{2070}-\x{218F}\x{2C00}-\x{2FEF}\x{3001}-\x{D7FF}'
+                . '\x{F900}-\x{FDCF}\x{FDF0}-\x{FFFD}\x{10000}-\x{EFFFF}';
+            $chars = $base . '_\\-0-9\x{00B7}\x{0300}-\x{036F}\x{203F}-\x{2040}';
+            $pattern = '/^[' . $base . '](?:[' . $chars . '.]*[' . $chars . '])?$/u';
+        }
+        // preg_match returns false on invalid UTF-8, which is not a valid
+        // prefix either.
+        return preg_match($pattern, $prefix) === 1;
     }
 
     private function assertSafeAttributeKey(string $key): void

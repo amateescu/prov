@@ -26,13 +26,14 @@ class JsonLdSerializer implements ProvSerializerInterface
 {
     private BlankLabelMinter $blankLabelMinter;
 
-    private ?PrefixMinter $minter = null;
+    private PrefixMinter $minter;
 
     public function __construct(
         public readonly bool $prettyPrint = false,
         public readonly bool $sortRecords = false,
     ) {
         $this->blankLabelMinter = new BlankLabelMinter(new Document([], [], []));
+        $this->minter = new PrefixMinter(new NamespaceManager());
     }
 
     /**
@@ -290,9 +291,7 @@ class JsonLdSerializer implements ProvSerializerInterface
         }
 
         foreach ($attributes->all() as $uri => $values) {
-            $key = $this->minter !== null
-                ? $this->minter->uriToPrefixed($uri, $nsManager)
-                : $nsManager->uriToPrefixed($uri);
+            $key = $this->minter->uriToPrefixed($uri, $nsManager);
             $key = NamespaceManager::stripDefaultSentinel($key);
             foreach ($values as $value) {
                 $this->appendProperty($node, $key, $this->serializeValue($value));
