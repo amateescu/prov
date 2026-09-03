@@ -100,7 +100,7 @@ class ConstraintValidator
      */
     public static function unsupportedConstraints(): array
     {
-        $all = array_column(ConstraintId::cases(), 'value');
+        $all = array_map(static fn(ConstraintId $id): int => $id->value, ConstraintId::cases());
         $missing = array_values(array_diff($all, self::IMPLEMENTED));
         sort($missing);
         return array_map(ConstraintId::from(...), $missing);
