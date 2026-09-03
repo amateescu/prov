@@ -15,7 +15,9 @@ use Prov\Identifier\QualifiedName;
  * identically. `Attributes` uses this to dedup identical attribute-value pairs
  * (PROV-DM models a record's attributes as a set of pairs), and
  * `Prov\Operation\DocumentComparator` uses it for semantic equality, so the two
- * never disagree about whether two values are the same.
+ * never disagree about whether two values are the same. It also owns the
+ * datatype URIs that decide whether a typed value is a qualified name, which
+ * the PROV-JSON reader and `Prov\Scan\JsonScanner` both go through.
  *
  * @internal
  */
@@ -24,6 +26,23 @@ final class ValueIdentity
     public const string XSD_STRING_URI = 'http://www.w3.org/2001/XMLSchema#string';
     public const string XML_LITERAL_URI = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral';
     public const string XSD_QNAME_URI = 'http://www.w3.org/2001/XMLSchema#QName';
+    public const string PROV_QUALIFIED_NAME_URI = 'http://www.w3.org/ns/prov#QUALIFIED_NAME';
+
+    /**
+     * Whether a datatype URI tags a value as a qualified name rather than a
+     * literal.
+     *
+     * `prov:QUALIFIED_NAME` is the tag ProvToolbox and python-prov write, so it
+     * is what most PROV-JSON in the wild uses; `xsd:QName` is the spelling in
+     * the 2013 W3C PROV-JSON submission examples. The scanner and the
+     * deserializer both decide through here, so they classify the same value
+     * the same way whatever prefix a document bound the datatype to.
+     */
+    public static function isQualifiedNameDatatype(string $uri): bool
+    {
+        $normalized = self::normalizeDatatypeUri($uri);
+        return $normalized === self::PROV_QUALIFIED_NAME_URI || $normalized === self::XSD_QNAME_URI;
+    }
 
     /**
      * @param ?array<string, string> $blankLabels

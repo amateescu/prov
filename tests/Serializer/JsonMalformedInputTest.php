@@ -102,6 +102,48 @@ final class JsonMalformedInputTest extends TestCase
         new JsonSerializer()->deserialize($input);
     }
 
+    /**
+     * A PROV-JSON document is a JSON object. A JSON list decodes to a PHP array
+     * just like an object does, so the root shape has to be checked explicitly
+     * or a list is read as an empty document.
+     *
+     * @return array<string, list<string>>
+     */
+    public static function nonObjectRootProvider(): array
+    {
+        return [
+            'root scalar' => ['42'],
+            'root string' => ['"hello"'],
+            'root null' => ['null'],
+            'non-empty list' => ['[{"entity":{}}]'],
+            'list of scalars' => ['[1,2,3]'],
+        ];
+    }
+
+    #[DataProvider('nonObjectRootProvider')]
+    public function testNonObjectRootIsRejected(string $input): void
+    {
+        $this->expectException(DeserializationException::class);
+        new JsonSerializer()->deserialize($input);
+    }
+
+    #[DataProvider('nonObjectRootProvider')]
+    public function testNonObjectRootIsRejectedLeniently(string $input): void
+    {
+        $this->expectException(DeserializationException::class);
+        new JsonSerializer()->deserializeLenient($input);
+    }
+
+    public function testEmptyObjectAndEmptyListAreEmptyDocuments(): void
+    {
+        // json_decode(..., true) cannot tell `{}` from `[]`, and an empty array
+        // carries no records either way, so both stay an empty document.
+        foreach (['{}', '[]'] as $input) {
+            $this->assertSame([], new JsonSerializer()->deserialize($input)->records);
+            $this->assertSame([], new JsonSerializer()->deserializeLenient($input)->document->records);
+        }
+    }
+
     public function testTruncationSweepNeverRaisesUntypedErrors(): void
     {
         $input = $this->validDocument();

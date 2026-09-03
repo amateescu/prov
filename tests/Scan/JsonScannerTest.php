@@ -7,7 +7,6 @@ namespace Prov\Tests\Scan;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Prov\Builder\DocumentBuilder;
-use Prov\Document;
 use Prov\Entity;
 use Prov\Exception\DeserializationException;
 use Prov\Identifier\ProvNamespace;

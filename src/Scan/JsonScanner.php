@@ -54,9 +54,6 @@ final class JsonScanner
 {
     private const string XSD_URI = 'http://www.w3.org/2001/XMLSchema#';
 
-    /** The datatype URI of the PROV-JSON qualified-name tag. */
-    private const string PROV_QUALIFIED_NAME_URI = 'http://www.w3.org/ns/prov#QUALIFIED_NAME';
-
     /** The element sections, in PROV-JSON layout order. */
     private const array ELEMENT_SECTIONS = ['entity', 'activity', 'agent'];
 
@@ -462,11 +459,7 @@ final class JsonScanner
         }
 
         $datatype = $this->tryResolve($type);
-        if ($datatype === null) {
-            return false;
-        }
-        $uri = ValueIdentity::normalizeDatatypeUri($datatype->getUri());
-        return $uri === self::PROV_QUALIFIED_NAME_URI || $uri === ValueIdentity::XSD_QNAME_URI;
+        return $datatype !== null && ValueIdentity::isQualifiedNameDatatype($datatype->getUri());
     }
 
     /**

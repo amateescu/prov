@@ -140,10 +140,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
      */
     public function deserialize(string $data): Document
     {
-        $json = json_decode($data, true);
-        if (!is_array($json)) {
-            throw new DeserializationException('Invalid PROV-JSON: could not decode JSON.');
-        }
+        $json = $this->decodeRoot($data);
 
         try {
             return $this->deserializeDocument($json);
@@ -168,10 +165,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
      */
     public function deserializeLenient(string $data): LenientDeserialization
     {
-        $json = json_decode($data, true);
-        if (!is_array($json)) {
-            throw new DeserializationException('Invalid PROV-JSON: could not decode JSON.');
-        }
+        $json = $this->decodeRoot($data);
 
         $this->warnings = [];
         try {
@@ -182,6 +176,30 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         } finally {
             $this->warnings = null;
         }
+    }
+
+    /**
+     * Decodes the document text and checks that its root is a JSON object.
+     *
+     * `json_decode(..., true)` turns both `{}` and `[]` into an empty PHP
+     * array, so an empty list stays acceptable and reads as an empty document.
+     * Any other list is a shape PROV-JSON does not define, and reading it as an
+     * empty document would silently accept a file that holds records.
+     *
+     * @return array<array-key, mixed>
+     *
+     * @throws \Prov\Exception\DeserializationException
+     */
+    private function decodeRoot(string $data): array
+    {
+        $json = json_decode($data, true);
+        if (!is_array($json)) {
+            throw new DeserializationException('Invalid PROV-JSON: could not decode JSON.');
+        }
+        if ($json !== [] && array_is_list($json)) {
+            throw new DeserializationException('Invalid PROV-JSON: the document root must be a map, not a list.');
+        }
+        return $json;
     }
 
     /**
@@ -1242,22 +1260,17 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             throw new DeserializationException('Invalid PROV-JSON: typed value "type" must be a string.');
         }
 
-        // prov:QUALIFIED_NAME is the QualifiedName tag emitted by ProvToolbox
-        // and python-prov, so it's what most PROV-JSON in the wild uses; xsd:QName
-        // is the spelling in the 2013 W3C PROV-JSON submission examples. Both are
-        // matched by their literal token, so the common case skips resolving the
-        // type.
+        // Both canonical qualified-name tags are matched by their literal token
+        // first, so the common case skips resolving the type.
         if ($type === 'prov:QUALIFIED_NAME' || $type === 'xsd:QName') {
             return $this->resolveQName($lexical, $nsManager);
         }
 
-        // A document may bind a non-standard prefix to the XSD namespace (e.g.
-        // xs:QName); catch that by the resolved datatype URI, not the raw token.
+        // A document may bind a non-standard prefix to the PROV or XSD namespace
+        // (p:QUALIFIED_NAME, xs:QName); catch that by the resolved datatype URI,
+        // not the raw token. JsonScanner decides through the same helper.
         $datatype = $type !== null ? $this->resolveQName($type, $nsManager) : null;
-        if (
-            $datatype !== null
-            && ValueIdentity::normalizeDatatypeUri($datatype->getUri()) === ValueIdentity::XSD_QNAME_URI
-        ) {
+        if ($datatype !== null && ValueIdentity::isQualifiedNameDatatype($datatype->getUri())) {
             return $this->resolveQName($lexical, $nsManager);
         }
 
