@@ -97,9 +97,8 @@ readonly class Attributes implements \Countable, \IteratorAggregate
      */
     public static function empty(): self
     {
-        /** @var \Prov\Attribute\Attributes|null $instance */
-        static $instance = null;
-        return $instance ??= new self();
+        static $instance = new self();
+        return $instance;
     }
 
     /**

@@ -61,15 +61,10 @@ final class DocumentOperations
 
     private static function anyMention(Document $document): bool
     {
-        if (self::containsMention($document->records)) {
-            return true;
-        }
-        foreach ($document->bundles as $bundle) {
-            if (self::containsMention($bundle->records)) {
-                return true;
-            }
-        }
-        return false;
+        return (
+            self::containsMention($document->records)
+            || array_any($document->bundles, static fn(Bundle $bundle): bool => self::containsMention($bundle->records))
+        );
     }
 
     // @mago-expect lint:no-boolean-flag-parameter
@@ -182,12 +177,7 @@ final class DocumentOperations
      */
     private static function containsMention(array $records): bool
     {
-        foreach ($records as $record) {
-            if ($record instanceof Mention) {
-                return true;
-            }
-        }
-        return false;
+        return array_any($records, static fn(ProvRecord $record): bool => $record instanceof Mention);
     }
 
     /**

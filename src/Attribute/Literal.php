@@ -135,7 +135,7 @@ readonly class Literal implements \Stringable
      */
     public static function formatDateTime(\DateTimeImmutable $value): string
     {
-        $pattern = $value->format('u') === '000000' ? \DateTimeInterface::ATOM : 'Y-m-d\TH:i:s.uP';
+        $pattern = $value->getMicrosecond() === 0 ? \DateTimeInterface::ATOM : 'Y-m-d\TH:i:s.uP';
         return $value->format($pattern);
     }
 

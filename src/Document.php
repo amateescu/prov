@@ -43,11 +43,6 @@ readonly class Document extends RecordContainer
     public function getBundleByIdentifier(QualifiedName $identifier): ?Bundle
     {
         $target = $identifier->getUri();
-        foreach ($this->bundles as $bundle) {
-            if ($bundle->identifier->getUri() === $target) {
-                return $bundle;
-            }
-        }
-        return null;
+        return array_find($this->bundles, static fn(Bundle $bundle): bool => $bundle->identifier->getUri() === $target);
     }
 }

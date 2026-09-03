@@ -225,12 +225,10 @@ final class PrefixMinter
      */
     private function visibleMint(string $uri, NamespaceManager $scope): ?ProvNamespace
     {
-        foreach ($this->minted[$uri] ?? [] as $ns) {
-            if ($scope->getNamespace($ns->prefix)?->uri === $ns->uri) {
-                return $ns;
-            }
-        }
-        return null;
+        return array_find(
+            $this->minted[$uri] ?? [],
+            static fn(ProvNamespace $ns): bool => $scope->getNamespace($ns->prefix)?->uri === $ns->uri,
+        );
     }
 
     /**

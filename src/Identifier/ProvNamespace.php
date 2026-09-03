@@ -16,9 +16,8 @@ readonly class ProvNamespace implements \Stringable
      */
     public static function prov(): self
     {
-        /** @var self|null $instance */
-        static $instance = null;
-        return $instance ??= new self('prov', 'http://www.w3.org/ns/prov#');
+        static $instance = new self('prov', 'http://www.w3.org/ns/prov#');
+        return $instance;
     }
 
     /**
@@ -26,9 +25,8 @@ readonly class ProvNamespace implements \Stringable
      */
     public static function xsd(): self
     {
-        /** @var self|null $instance */
-        static $instance = null;
-        return $instance ??= new self('xsd', 'http://www.w3.org/2001/XMLSchema#');
+        static $instance = new self('xsd', 'http://www.w3.org/2001/XMLSchema#');
+        return $instance;
     }
 
     /**

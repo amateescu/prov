@@ -87,12 +87,10 @@ abstract readonly class RecordContainer
     public function getRecordByIdentifier(QualifiedName $identifier): ?ProvRecord
     {
         $target = $identifier->getUri();
-        foreach ($this->records as $record) {
-            if ($record->identifier?->getUri() === $target) {
-                return $record;
-            }
-        }
-        return null;
+        return array_find(
+            $this->records,
+            static fn(ProvRecord $record): bool => $record->identifier?->getUri() === $target,
+        );
     }
 
     /**

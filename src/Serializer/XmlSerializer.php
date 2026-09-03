@@ -317,9 +317,8 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
      */
     private static function xsdNamespace(): ProvNamespace
     {
-        /** @var \Prov\Identifier\ProvNamespace|null $instance */
-        static $instance = null;
-        return $instance ??= new ProvNamespace('xsd', self::XSD_NS);
+        static $instance = new ProvNamespace('xsd', self::XSD_NS);
+        return $instance;
     }
 
     private function setTypedTextContent(\DOMElement $el, mixed $value, NamespaceManager $nsManager): void
