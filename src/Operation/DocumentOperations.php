@@ -32,8 +32,8 @@ final class DocumentOperations
      * Known limitation: blank-node labels are container-scoped, and flattening
      * does not rename them. A document assembled through DocumentBuilder is
      * safe (a document and its bundles share one label sequence, and
-     * `addBundle()` renames an incoming bundle's colliding labels), as is a
-     * document from `merge()`. A Document built by hand that reuses a label
+     * `DocumentBuilder::build()` renames a bundle's colliding labels apart), as
+     * is a document from `merge()`. A Document built by hand that reuses a label
      * (say `_:b1`) in both the document and a bundle will have those unrelated
      * records identified after flattening.
      *

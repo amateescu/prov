@@ -23,11 +23,14 @@ use Prov\Model\RecordRewriter;
  */
 class DocumentBuilder extends RecordBuilder
 {
-    /** @var list<\Prov\Bundle> */
+    /**
+     * Attached bundles and pending bundle builders, in the order they were
+     * added. `build()` materializes the builders in place, so the document's
+     * bundles come out in that same order.
+     *
+     * @var list<\Prov\Bundle|\Prov\Builder\BundleBuilder>
+     */
     private array $bundles = [];
-
-    /** @var list<\Prov\Builder\BundleBuilder> */
-    private array $bundleBuilders = [];
 
     /**
      * @param \Prov\Identifier\NamespaceManager|iterable<\Prov\Identifier\ProvNamespace> $namespaces
@@ -61,7 +64,7 @@ class DocumentBuilder extends RecordBuilder
             new NamespaceManager($this->namespaceManager),
             $this,
         );
-        $this->bundleBuilders[] = $bundleBuilder;
+        $this->bundles[] = $bundleBuilder;
         return $bundleBuilder;
     }
 
@@ -78,14 +81,23 @@ class DocumentBuilder extends RecordBuilder
             $this,
         );
         $callback($bundleBuilder);
+        $this->bundles[] = $this->buildNestedBundle($bundleBuilder);
+        return $this;
+    }
+
+    /**
+     * Builds a bundle from its builder, passing the document-level output
+     * flags down first.
+     */
+    private function buildNestedBundle(BundleBuilder $bundleBuilder): Bundle
+    {
         if ($this->keepUnusedNamespaces) {
             $bundleBuilder->keepUnusedNamespaces();
         }
         if ($this->autoDeclareEntities) {
             $bundleBuilder->autoDeclareEntities();
         }
-        $this->bundles[] = $bundleBuilder->build();
-        return $this;
+        return $bundleBuilder->build();
     }
 
     /**
@@ -102,54 +114,67 @@ class DocumentBuilder extends RecordBuilder
      * Bundle is constructed outside the fluent flow (e.g. deserialized).
      *
      * The bundle labels its blank nodes outside this builder's blank()
-     * sequence, so a label it uses can already name an unrelated record here,
-     * and a later blank() call could mint one it uses. flatten() lifts bundle
-     * records to document level without renaming, which would merge the two.
-     * Both directions are closed here: a label this builder already holds is
-     * renamed in the incoming bundle, and the counter moves past every label
-     * the bundle keeps.
+     * sequence, so the counter moves past every label the bundle keeps and a
+     * later blank() cannot mint one of them. A label the bundle shares with
+     * another container is renamed when the document is built, see
+     * standardizeBlankNodesApart().
      */
     public function addBundle(Bundle $bundle): static
     {
-        $bundle = $this->standardizeBlankNodesApart($bundle);
         $this->advanceBlankNodeCounterPast($this->maxBlankNodeNumber($bundle->records));
         $this->bundles[] = $bundle;
         return $this;
     }
 
     /**
-     * Returns `$bundle` with every blank label this builder already holds
-     * renamed to one nothing in play uses.
+     * Renames the blank labels a bundle shares with a container that came
+     * before it, so two independent anonymous records never end up under one
+     * name.
      *
-     * The labels in play are the ones this builder's own records use plus the
-     * ones its attached bundles use. Labels unique to the incoming bundle are
-     * left alone, so records that did not collide keep their names.
+     * A blank label only names a record inside its own container, and
+     * flatten() lifts bundle records to document level without renaming them.
+     * Containers are handled in the order they were added, the document's own
+     * records first, and each bundle is renamed against every label seen
+     * before it. The document keeps its labels, so a QualifiedName the caller
+     * still holds stays valid. Labels that do not collide are left alone, and
+     * a bundle without a collision comes back as it went in.
+     *
+     * This runs at build time because a collision can show up late: an
+     * explicit QualifiedName::blankNode() or `_:` string never passes through
+     * blank(), and a bundle builder holds its records until build().
+     *
+     * @param list<\Prov\Model\ProvRecord> $records
+     *   The document's own records.
+     * @param list<\Prov\Bundle> $bundles
+     *   The bundles, in the order they were added.
+     *
+     * @return list<\Prov\Bundle>
      */
-    private function standardizeBlankNodesApart(Bundle $bundle): Bundle
+    private static function standardizeBlankNodesApart(array $records, array $bundles): array
     {
-        $used = BlankNodes::labels($this->records);
-        foreach ($this->bundles as $attached) {
-            $used += BlankNodes::labels($attached->records);
-        }
-        if ($used === []) {
-            return $bundle;
-        }
+        $taken = BlankNodes::labels($records);
+        foreach ($bundles as $index => $bundle) {
+            $labels = BlankNodes::labels($bundle->records);
+            $colliding = array_intersect_key($labels, $taken);
+            $taken += $labels;
+            if ($colliding === []) {
+                continue;
+            }
 
-        $incoming = BlankNodes::labels($bundle->records);
-        $colliding = array_intersect_key($incoming, $used);
-        if ($colliding === []) {
-            return $bundle;
+            $renames = BlankNodes::renames($colliding, $taken);
+            foreach ($renames as $fresh) {
+                $taken[$fresh->getUri()] = true;
+            }
+            $mapName = static fn(QualifiedName $qn): QualifiedName => $renames[$qn->getUri()] ?? $qn;
+            $rebuild = static fn(ProvRecord $record): ProvRecord => RecordRewriter::rebuild($record, $mapName);
+
+            $bundles[$index] = new Bundle(
+                identifier: $bundle->identifier,
+                records: array_map($rebuild, $bundle->records),
+                namespaces: $bundle->namespaces,
+            );
         }
-
-        $renames = BlankNodes::renames($colliding, $used + $incoming);
-        $mapName = static fn(QualifiedName $qn): QualifiedName => $renames[$qn->getUri()] ?? $qn;
-        $rebuild = static fn(ProvRecord $record): ProvRecord => RecordRewriter::rebuild($record, $mapName);
-
-        return new Bundle(
-            identifier: $bundle->identifier,
-            records: array_map($rebuild, $bundle->records),
-            namespaces: $bundle->namespaces,
-        );
+        return $bundles;
     }
 
     /**
@@ -186,7 +211,9 @@ class DocumentBuilder extends RecordBuilder
      * Namespace declarations are pruned to the ones the document's records
      * (including bundle contents) actually reference, unless
      * `keepUnusedNamespaces()` was called. Bundles attached with `addBundle()`
-     * keep their namespaces as built.
+     * keep their namespaces as built. Blank labels a bundle shares with the
+     * document or with an earlier bundle are renamed apart, see
+     * standardizeBlankNodesApart().
      *
      * @throws \LogicException
      *   On a second call: builders are single-use.
@@ -200,16 +227,11 @@ class DocumentBuilder extends RecordBuilder
             $records = [...$records, ...self::autoDeclaredEntities($records)];
         }
 
-        $bundles = $this->bundles;
-        foreach ($this->bundleBuilders as $bb) {
-            if ($this->keepUnusedNamespaces) {
-                $bb->keepUnusedNamespaces();
-            }
-            if ($this->autoDeclareEntities) {
-                $bb->autoDeclareEntities();
-            }
-            $bundles[] = $bb->build();
+        $bundles = [];
+        foreach ($this->bundles as $bundle) {
+            $bundles[] = $bundle instanceof BundleBuilder ? $this->buildNestedBundle($bundle) : $bundle;
         }
+        $bundles = self::standardizeBlankNodesApart($records, $bundles);
 
         $namespaces = $this->namespaceManager->getRegisteredNamespaces();
         if (!$this->keepUnusedNamespaces) {

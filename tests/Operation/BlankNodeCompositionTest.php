@@ -357,6 +357,172 @@ final class BlankNodeCompositionTest extends TestCase
         $this->assertSame(['_:b1' => true, '_:b9' => true], BlankNodes::labels($flat->records));
     }
 
+    /**
+     * A name handed out by blank() stays apart from a bundle's label even when
+     * the caller holds it and only puts it in a record after the bundle was
+     * attached.
+     */
+    public function testAddBundleKeepsARetainedBlankNameApart(): void
+    {
+        $builder = new DocumentBuilder([$this->ex]);
+        $blank = $builder->blank();
+
+        $shared = QualifiedName::blankNode('b1');
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [
+                new Entity($shared),
+                new Specialization(null, $shared, $this->ex->qualifiedName('b')),
+            ],
+            namespaces: [],
+        ));
+
+        $builder->entity($blank);
+        $builder->specializationOf(specificEntity: $blank, generalEntity: $this->ex->qualifiedName('a'));
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $neighbours = $this->neighboursByBlank($flat);
+        $this->assertCount(2, $neighbours, 'The retained name and the bundle node were merged into one.');
+        $this->assertSame('_:b1', $blank->getUri(), 'The retained name changed.');
+        $this->assertSame(['http://example.org/a'], $neighbours['_:b1'] ?? []);
+    }
+
+    public function testAddBundleKeepsANameMintedThroughABundleBuilderApart(): void
+    {
+        $builder = new DocumentBuilder([$this->ex]);
+        $child = $builder->bundle($this->ex->qualifiedName('child'));
+        $blank = $child->blank();
+
+        $shared = QualifiedName::blankNode('b1');
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [
+                new Entity($shared),
+                new Specialization(null, $shared, $this->ex->qualifiedName('b')),
+            ],
+            namespaces: [],
+        ));
+
+        $child->entity($blank);
+        $child->specializationOf(specificEntity: $blank, generalEntity: $this->ex->qualifiedName('a'));
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $neighbours = $this->neighboursByBlank($flat);
+        $this->assertCount(2, $neighbours, 'The retained name and the bundle node were merged into one.');
+        $this->assertSame('_:b1', $blank->getUri(), 'The retained name changed.');
+        $this->assertSame(['http://example.org/a'], $neighbours['_:b1'] ?? []);
+    }
+
+    /**
+     * Holding a minted name changes nothing else: a bundle label that does not
+     * collide with it is kept, and the next mint still follows the counter.
+     */
+    public function testAddBundleAfterARetainedBlankNameLeavesOtherLabelsAlone(): void
+    {
+        $builder = new DocumentBuilder([$this->ex]);
+        $first = $builder->blank();
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [new Entity(QualifiedName::blankNode('b9'))],
+            namespaces: [],
+        ));
+        $builder->entity($first);
+
+        $this->assertSame('_:b10', $builder->blank()->getUri());
+
+        $flat = DocumentOperations::flatten($builder->build());
+        $this->assertSame(['_:b1' => true, '_:b9' => true], BlankNodes::labels($flat->records));
+    }
+
+    /**
+     * An explicit label can reach a record after a bundle was attached, so the
+     * collision only exists once every record is in.
+     */
+    public function testBuildKeepsAnExplicitDocumentLabelApartFromAnAttachedBundle(): void
+    {
+        $shared = QualifiedName::blankNode('same');
+
+        $builder = new DocumentBuilder([$this->ex]);
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [
+                new Entity($shared),
+                new Specialization(null, $shared, $this->ex->qualifiedName('b')),
+            ],
+            namespaces: [],
+        ));
+        $builder->entity($shared);
+        $builder->specializationOf(specificEntity: $shared, generalEntity: $this->ex->qualifiedName('a'));
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $neighbours = $this->neighboursByBlank($flat);
+        $this->assertCount(2, $neighbours, 'The document and the bundle node were merged into one.');
+        $this->assertSame(
+            ['http://example.org/a'],
+            $neighbours['_:same'] ?? [],
+            'The document record did not keep its label.',
+        );
+    }
+
+    /**
+     * A pending bundle builder holds its records until build(), so a label it
+     * uses is invisible while a colliding bundle is attached.
+     */
+    public function testBuildKeepsAnExplicitBundleBuilderLabelApartFromAnAttachedBundle(): void
+    {
+        $shared = QualifiedName::blankNode('same');
+
+        $builder = new DocumentBuilder([$this->ex]);
+        $child = $builder->bundle($this->ex->qualifiedName('child'));
+        $child->entity($shared);
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [new Entity($shared)],
+            namespaces: [],
+        ));
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $this->assertCount(2, BlankNodes::labels($flat->records), 'Two independent nodes kept a single label.');
+    }
+
+    public function testBuildKeepsAnExplicitBlankStringApartFromAnAttachedBundle(): void
+    {
+        $builder = new DocumentBuilder([$this->ex]);
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [new Entity(QualifiedName::blankNode('same'))],
+            namespaces: [],
+        ));
+        $builder->entity('_:same');
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $this->assertCount(2, BlankNodes::labels($flat->records), 'Two independent nodes kept a single label.');
+    }
+
+    /**
+     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Model\ProvRecord $make
+     */
+    #[DataProvider('blankReferencePositions')]
+    public function testBuildRenamesExplicitBlankLabelsInEveryPosition(callable $make): void
+    {
+        $builder = new DocumentBuilder([$this->ex]);
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [$make(QualifiedName::blankNode('b1'))],
+            namespaces: [],
+        ));
+        $builder->entity(QualifiedName::blankNode('b1'));
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $this->assertCount(2, BlankNodes::labels($flat->records), 'Two independent nodes kept a single label.');
+    }
+
     public function testFlattenAfterAddBundleKeepsBlankValuesIndependent(): void
     {
         $bundle = new Bundle(
