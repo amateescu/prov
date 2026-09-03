@@ -8,7 +8,6 @@ use Prov\Activity;
 use Prov\Agent;
 use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
-use Prov\Attribute\ValueIdentity;
 use Prov\Bundle;
 use Prov\Document;
 use Prov\Entity;
@@ -180,7 +179,7 @@ class ProvNSerializer implements ProvSerializerInterface
         $lines = [];
         foreach ($namespaces as $ns) {
             $this->assertSafeNamespace($ns);
-            if (self::isImplicitNamespace($ns)) {
+            if ($ns->isCanonicalReservedBinding()) {
                 continue;
             }
             if ($ns->prefix === 'default') {
@@ -192,24 +191,6 @@ class ProvNSerializer implements ProvSerializerInterface
             }
         }
         return $lines;
-    }
-
-    /**
-     * Whether a namespace is one of the two PROV-N declares implicitly, bound
-     * to its canonical URI.
-     */
-    private static function isImplicitNamespace(ProvNamespace $ns): bool
-    {
-        if ($ns->prefix === 'prov') {
-            return $ns->uri === ProvNamespace::prov()->uri;
-        }
-        if ($ns->prefix === 'xsd') {
-            // PROV-XML declares the XSD namespace without the trailing '#' and
-            // PROV-JSON declares it with one. Both name the namespace PROV-N
-            // binds to `xsd` implicitly.
-            return ValueIdentity::normalizeDatatypeUri($ns->uri) === ProvNamespace::xsd()->uri;
-        }
-        return false;
     }
 
     private function serializeRecord(ProvRecord $record, NamespaceManager $nsManager): ?string
@@ -509,7 +490,7 @@ class ProvNSerializer implements ProvSerializerInterface
     private function assertSafeNamespace(ProvNamespace $ns): void
     {
         if ($ns->prefix !== 'default') {
-            if (($ns->prefix === 'prov' || $ns->prefix === 'xsd') && !self::isImplicitNamespace($ns)) {
+            if (($ns->prefix === 'prov' || $ns->prefix === 'xsd') && !$ns->isCanonicalReservedBinding()) {
                 throw new \InvalidArgumentException(
                     "PROV-N declares the prefix '{$ns->prefix}' implicitly and forbids redeclaring it, "
                     . "so it cannot be bound to '{$ns->uri}'. Rename the prefix before serializing.",

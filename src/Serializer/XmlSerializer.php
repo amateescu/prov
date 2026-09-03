@@ -44,6 +44,10 @@ use Prov\Relation\Usage;
  * Serializes Documents to and parses them from PROV-XML, the W3C's
  * XML-based interchange format for PROV.
  *
+ * The root binds prov and xsd to their canonical namespaces, because the output
+ * carries prov:* and xsd:* terms of its own. A document that binds either
+ * prefix elsewhere keeps that namespace under a minted prefix.
+ *
  * @mago-ignore analysis:possibly-false-argument
  * @mago-ignore analysis:invalid-method-access
  * @mago-ignore analysis:invalid-property-access
@@ -99,7 +103,13 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $nsManager = new NamespaceManager();
         foreach (OutputOrder::namespaces($document->namespaces) as $ns) {
             if ($ns->prefix === 'prov' || $ns->prefix === 'xsd') {
-                $nsManager->addOrReplace($ns);
+                // The root binds both prefixes to their canonical namespaces
+                // and the body writes prov:* and xsd:* terms against them. A
+                // declaration that agrees joins the scope; a foreign one is
+                // left out, so the minter gives its names another prefix.
+                if ($ns->isCanonicalReservedBinding()) {
+                    $nsManager->addOrReplace($ns);
+                }
                 continue;
             }
             if ($ns->prefix === 'default') {
@@ -483,9 +493,16 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             if ($existing !== null && $existing->uri === $ns->uri || $ns->prefix === 'default') {
                 continue;
             }
-            if ($ns->prefix !== 'prov' && $ns->prefix !== 'xsd') {
-                $el->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:' . $ns->prefix, $ns->uri);
+            if ($ns->prefix === 'prov' || $ns->prefix === 'xsd') {
+                // Same rule as at document level: the root's canonical bindings
+                // stand, and a foreign one for either prefix stays out of the
+                // scope so its names get a minted prefix.
+                if ($ns->isCanonicalReservedBinding()) {
+                    $bundleNsManager->addOrReplace($ns);
+                }
+                continue;
             }
+            $el->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:' . $ns->prefix, $ns->uri);
             $bundleNsManager->addOrReplace($ns);
         }
 

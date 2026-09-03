@@ -30,6 +30,10 @@ use Prov\Relation\Dictionary\DictionaryEntry;
  * instead, so every compact IRI in the output expands to the URI the model
  * carries.
  *
+ * The context always binds prov and xsd to their canonical namespaces, because
+ * the serializer writes prov:* and xsd:* terms of its own. A document that
+ * binds either prefix elsewhere keeps that namespace under a minted prefix.
+ *
  * PROV-O models specializationOf, alternateOf, hadMember and mentionOf as plain
  * object properties with no qualified form, and PROV-Dictionary does the same
  * for hadDictionaryMember. Those relations have nowhere to put an identifier or
@@ -38,6 +42,9 @@ use Prov\Relation\Dictionary\DictionaryEntry;
  */
 class JsonLdSerializer implements ProvSerializerInterface
 {
+    private const string PROV_URI = 'http://www.w3.org/ns/prov#';
+    private const string XSD_URI = 'http://www.w3.org/2001/XMLSchema#';
+
     private BlankLabelMinter $blankLabelMinter;
 
     private PrefixMinter $minter;
@@ -62,7 +69,7 @@ class JsonLdSerializer implements ProvSerializerInterface
     {
         $this->blankLabelMinter = new BlankLabelMinter($document);
 
-        $nsManager = NamespaceManager::forContainer($document->namespaces);
+        $nsManager = self::contextManager($document);
         $minter = new PrefixMinter($nsManager);
         $this->minter = $minter;
 
@@ -129,21 +136,40 @@ class JsonLdSerializer implements ProvSerializerInterface
     }
 
     /**
+     * The namespace scope the document's names are written against.
+     *
+     * The context binds prov and xsd to their canonical namespaces because the
+     * serializer writes prov:* and xsd:* terms itself. A document that binds
+     * either prefix to another namespace keeps that namespace, but not the
+     * prefix: the declaration stays out of the scope, so `PrefixMinter` gives
+     * its names a prefix of their own and every compact IRI still expands to
+     * the URI the model carries.
+     */
+    private static function contextManager(Document $document): NamespaceManager
+    {
+        $namespaces = [];
+        foreach ($document->namespaces as $ns) {
+            if (($ns->prefix === 'prov' || $ns->prefix === 'xsd') && !$ns->isCanonicalReservedBinding()) {
+                continue;
+            }
+            $namespaces[] = $ns;
+        }
+        return NamespaceManager::forContainer($namespaces);
+    }
+
+    /**
      * Builds the JSON-LD `@context` block from the namespace declarations the
      * document wrote against. The library's "default" prefix maps to `@vocab`.
-     * The prov and xsd namespaces are always included: the serializer emits
-     * prov:* and xsd:* terms structurally, and unlike the library's
-     * deserializers, an external JSON-LD consumer has no built-in bindings for
-     * them.
+     * The prov and xsd namespaces are always included, and are written last so
+     * nothing can rebind them: the serializer emits prov:* and xsd:* terms
+     * structurally, and unlike the library's deserializers, an external JSON-LD
+     * consumer has no built-in bindings for them.
      *
      * @return array<string, string>
      */
     private function buildContext(NamespaceManager $context): array
     {
-        $bindings = [
-            'prov' => 'http://www.w3.org/ns/prov#',
-            'xsd' => 'http://www.w3.org/2001/XMLSchema#',
-        ];
+        $bindings = [];
         foreach ($context->getRegisteredNamespaces() as $ns) {
             if ($ns->prefix === 'default') {
                 $bindings['@vocab'] = $ns->uri;
@@ -151,6 +177,8 @@ class JsonLdSerializer implements ProvSerializerInterface
                 $bindings[$ns->prefix] = $ns->uri;
             }
         }
+        $bindings['prov'] = self::PROV_URI;
+        $bindings['xsd'] = self::XSD_URI;
         return $bindings;
     }
 

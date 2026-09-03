@@ -66,6 +66,22 @@ readonly class ProvNamespace implements \Stringable
         return new QualifiedName($this, $localPart);
     }
 
+    /**
+     * Whether this declaration binds a reserved prefix, `prov` or `xsd`, to
+     * the namespace every serializer already binds it to. The XSD namespace
+     * counts with or without its trailing `#`: PROV-XML declares it without,
+     * PROV-JSON with, and both name the same namespace. A declaration for any
+     * other prefix is never a reserved binding.
+     */
+    public function isCanonicalReservedBinding(): bool
+    {
+        return match ($this->prefix) {
+            'prov' => $this->uri === self::prov()->uri,
+            'xsd' => $this->uri === self::xsd()->uri || $this->uri . '#' === self::xsd()->uri,
+            default => false,
+        };
+    }
+
     public function __toString(): string
     {
         return $this->uri;
