@@ -142,8 +142,8 @@ The graph covers the container's own records; flatten a document first to query 
 ```php
 $result = Prov::validate($document);
 
-if (!$result->isValid()) {
-    foreach ($result->getViolations() as $violation) {
+if (!$result->isValid) {
+    foreach ($result->violations as $violation) {
         echo "[C{$violation->constraintId}] {$violation->message}\n";
     }
 }
@@ -152,7 +152,7 @@ if (!$result->isValid()) {
 Prov::validate($document)->throwIfInvalid();  // raises ConstraintViolationException
 ```
 
-Coverage is partial: rules that need transitive graph reasoning over derivation chains aren't implemented, so `isValid() === true` only means no checked rule was violated. Use `ConstraintValidator::implementedConstraints()` or `::unsupportedConstraints()` to see the exact set.
+Coverage is partial: rules that need transitive graph reasoning over derivation chains aren't implemented, so `$isValid === true` only means no checked rule was violated. Use `ConstraintValidator::implementedConstraints()` or `::unsupportedConstraints()` to see the exact set.
 
 ## Builder tips
 

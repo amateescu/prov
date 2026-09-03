@@ -172,7 +172,7 @@ final class NamespaceManagerTest extends TestCase
         $ex = new ProvNamespace('ex', 'http://example.org/');
         $manager->add($ex);
 
-        $namespaces = $manager->getRegisteredNamespaces();
+        $namespaces = $manager->registeredNamespaces;
         $prefixes = array_map(static fn(ProvNamespace $ns) => $ns->prefix, $namespaces);
 
         $this->assertContains('prov', $prefixes);
@@ -303,7 +303,7 @@ final class NamespaceManagerTest extends TestCase
         $child = new NamespaceManager($parent);
         $child->add(new ProvNamespace('childonly', 'http://child.org/'));
 
-        $childPrefixes = array_map(static fn(ProvNamespace $ns) => $ns->prefix, $child->getRegisteredNamespaces());
+        $childPrefixes = array_map(static fn(ProvNamespace $ns) => $ns->prefix, $child->registeredNamespaces);
 
         $this->assertContains('childonly', $childPrefixes);
         $this->assertNotContains('parentonly', $childPrefixes);

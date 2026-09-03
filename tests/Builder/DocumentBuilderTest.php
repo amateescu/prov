@@ -517,7 +517,7 @@ final class DocumentBuilderTest extends TestCase
 
         $builder = new DocumentBuilder($manager);
 
-        $this->assertSame($manager, $builder->getNamespaceManager());
+        $this->assertSame($manager, $builder->namespaceManager);
         $doc = $builder->entity('ex:e1')->build();
         $this->assertSame('http://example.org/e1', $doc->entities[0]->identifier->uri);
     }
@@ -547,7 +547,7 @@ final class DocumentBuilderTest extends TestCase
         $builder = new DocumentBuilder();
         $builder->addNamespace($this->ex);
 
-        $manager = $builder->getNamespaceManager();
+        $manager = $builder->namespaceManager;
 
         $this->assertSame($this->ex, $manager->getNamespace('ex'));
     }
@@ -555,7 +555,7 @@ final class DocumentBuilderTest extends TestCase
     public function testGetNamespaceManagerSharesLiveStateNotASnapshot(): void
     {
         $builder = new DocumentBuilder();
-        $manager = $builder->getNamespaceManager();
+        $manager = $builder->namespaceManager;
 
         $builder->addNamespace($this->ex);
 

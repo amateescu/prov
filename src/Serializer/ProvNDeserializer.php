@@ -90,7 +90,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
 
         $this->keyword('endDocument');
 
-        return new Document(records: $records, bundles: $bundles, namespaces: $nsManager->getRegisteredNamespaces());
+        return new Document(records: $records, bundles: $bundles, namespaces: $nsManager->registeredNamespaces);
     }
 
     // --- Body parsing ---
@@ -228,7 +228,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
         $bundles[] = new Bundle(
             identifier: $this->resolveQName($id, $nsManager),
             records: $bundleRecords,
-            namespaces: $childNs->getRegisteredNamespaces(),
+            namespaces: $childNs->registeredNamespaces,
         );
     }
 

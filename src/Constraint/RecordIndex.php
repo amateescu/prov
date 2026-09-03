@@ -49,47 +49,81 @@ class RecordIndex
     private array $endsByActivity = [];
 
     /** @var array<string, \Prov\Activity> URI -> \Prov\Activity */
-    private array $activities = [];
+    private array $activitiesByUri = [];
 
     /** @var list<\Prov\Activity> */
-    private array $activityRecords = [];
+    public private(set) array $activities = [];
 
     /** @var list<\Prov\Relation\Generation> */
-    private array $generations = [];
+    public private(set) array $generations = [];
 
     /** @var list<\Prov\Relation\Usage> */
-    private array $usages = [];
+    public private(set) array $usages = [];
 
     /** @var list<\Prov\Relation\Invalidation> */
-    private array $invalidations = [];
+    public private(set) array $invalidations = [];
 
     /** @var list<\Prov\Relation\Start> */
-    private array $starts = [];
+    public private(set) array $starts = [];
 
     /** @var list<\Prov\Relation\End> */
-    private array $ends = [];
+    public private(set) array $ends = [];
 
     /** @var list<\Prov\Relation\Specialization> */
-    private array $specializations = [];
+    public private(set) array $specializations = [];
 
     /** @var list<\Prov\Relation\Derivation> */
-    private array $derivations = [];
+    public private(set) array $derivations = [];
 
     /** @var list<\Prov\Relation\Membership> */
-    private array $memberships = [];
+    public private(set) array $memberships = [];
 
     /** @var array<string, true> Entity URIs with prov:type = prov:EmptyCollection */
     private array $emptyCollections = [];
 
     /** @var list<\Prov\Model\ProvRecord> */
-    private array $records;
+    public private(set) array $records;
 
     /**
-     * Cached getActivityTimeBounds() result.
+     * Entity URIs referenced by any generation, usage, or invalidation, whether
+     * or not the entity is declared. Drives the generation/usage/invalidation
+     * ordering checks (36 to 40) so referenced-but-undeclared entities are
+     * covered and each entity is examined exactly once.
      *
-     * @var ?array<string, array{start: ?\DateTimeImmutable, end: ?\DateTimeImmutable}>
+     * @var list<string>
      */
-    private ?array $activityTimeBounds = null;
+    public array $entityUrisWithEvents {
+        get => array_keys($this->generationsByEntity + $this->usagesByEntity + $this->invalidationsByEntity);
+    }
+
+    /**
+     * Activity URIs referenced by any start or end event, whether or not the
+     * activity is declared. Drives the start-precedes-end check (30) so
+     * referenced-but-undeclared activities are covered.
+     *
+     * @var list<string>
+     */
+    public array $activityUrisWithEvents {
+        get => array_keys($this->startsByActivity + $this->endsByActivity);
+    }
+
+    /**
+     * The time bounds known for each activity URI: the latest start it is said
+     * to have and the earliest end, gathered from the activity records' inline
+     * times and from every timed start and end event that names it. An
+     * activity that is only referenced by its events, never declared, is
+     * covered too (scruffy PROV).
+     *
+     * Every start of an activity precedes every end, usage, and generation
+     * (constraints 30, 33, and 34), so the latest start and the earliest end
+     * are the binding pair for all three checks. A null bound means no timed
+     * source for that side exists. Computed on first read.
+     *
+     * @var array<string, array{start: ?\DateTimeImmutable, end: ?\DateTimeImmutable}>
+     */
+    public array $activityTimeBounds {
+        get => $this->activityTimeBounds ??= $this->computeActivityTimeBounds();
+    }
 
     /**
      * @param list<\Prov\Model\ProvRecord> $records
@@ -112,7 +146,7 @@ class RecordIndex
                 $this->elementTypes[$id][] = $record::class;
 
                 if ($record instanceof Activity) {
-                    $this->activities[$id] = $record;
+                    $this->activitiesByUri[$id] = $record;
                 }
 
                 if ($record instanceof Entity) {
@@ -130,7 +164,7 @@ class RecordIndex
             }
 
             if ($record instanceof Activity) {
-                $this->activityRecords[] = $record;
+                $this->activities[] = $record;
             } elseif ($record instanceof Generation) {
                 $this->generations[] = $record;
                 $this->generationsByEntity[$record->entity->getUri()][] = $record;
@@ -165,42 +199,6 @@ class RecordIndex
         }
     }
 
-    /** @return list<\Prov\Activity> */
-    public function getActivities(): array
-    {
-        return $this->activityRecords;
-    }
-
-    /** @return list<\Prov\Relation\Generation> */
-    public function getGenerations(): array
-    {
-        return $this->generations;
-    }
-
-    /** @return list<\Prov\Relation\Usage> */
-    public function getUsages(): array
-    {
-        return $this->usages;
-    }
-
-    /** @return list<\Prov\Relation\Invalidation> */
-    public function getInvalidations(): array
-    {
-        return $this->invalidations;
-    }
-
-    /** @return list<\Prov\Relation\Start> */
-    public function getStarts(): array
-    {
-        return $this->starts;
-    }
-
-    /** @return list<\Prov\Relation\End> */
-    public function getEnds(): array
-    {
-        return $this->ends;
-    }
-
     /** @return list<string> Element class names for this URI */
     public function getElementTypes(string $uri): array
     {
@@ -215,7 +213,7 @@ class RecordIndex
 
     public function getActivity(string $uri): ?Activity
     {
-        return $this->activities[$uri] ?? null;
+        return $this->activitiesByUri[$uri] ?? null;
     }
 
     /** @return list<\Prov\Relation\Generation> */
@@ -236,31 +234,6 @@ class RecordIndex
         return $this->invalidationsByEntity[$uri] ?? [];
     }
 
-    /**
-     * Entity URIs referenced by any generation, usage, or invalidation, whether
-     * or not the entity is declared. Drives the generation/usage/invalidation
-     * ordering checks (36 to 40) so referenced-but-undeclared entities are
-     * covered and each entity is examined exactly once.
-     *
-     * @return list<string>
-     */
-    public function getEntityUrisWithEvents(): array
-    {
-        return array_keys($this->generationsByEntity + $this->usagesByEntity + $this->invalidationsByEntity);
-    }
-
-    /**
-     * Activity URIs referenced by any start or end event, whether or not the
-     * activity is declared. Drives the start-precedes-end check (30) so
-     * referenced-but-undeclared activities are covered.
-     *
-     * @return list<string>
-     */
-    public function getActivityUrisWithEvents(): array
-    {
-        return array_keys($this->startsByActivity + $this->endsByActivity);
-    }
-
     /** @return list<\Prov\Relation\Start> */
     public function getStartsForActivity(string $uri): array
     {
@@ -274,28 +247,13 @@ class RecordIndex
     }
 
     /**
-     * The time bounds known for each activity URI: the latest start it is said
-     * to have and the earliest end, gathered from the activity records' inline
-     * times and from every timed start and end event that names it. An
-     * activity that is only referenced by its events, never declared, is
-     * covered too (scruffy PROV).
-     *
-     * Every start of an activity precedes every end, usage, and generation
-     * (constraints 30, 33, and 34), so the latest start and the earliest end
-     * are the binding pair for all three checks. A null bound means no timed
-     * source for that side exists.
-     *
      * @return array<string, array{start: ?\DateTimeImmutable, end: ?\DateTimeImmutable}>
      */
-    public function getActivityTimeBounds(): array
+    private function computeActivityTimeBounds(): array
     {
-        if ($this->activityTimeBounds !== null) {
-            return $this->activityTimeBounds;
-        }
-
         /** @var array<string, array{starts: list<\DateTimeImmutable>, ends: list<\DateTimeImmutable>}> $times */
         $times = [];
-        foreach ($this->activityRecords as $activity) {
+        foreach ($this->activities as $activity) {
             $uri = $activity->identifier?->getUri();
             if ($uri === null) {
                 continue;
@@ -308,7 +266,7 @@ class RecordIndex
                 $times[$uri]['ends'][] = $activity->endTime;
             }
         }
-        foreach ($this->getActivityUrisWithEvents() as $uri) {
+        foreach ($this->activityUrisWithEvents as $uri) {
             $times[$uri] ??= ['starts' => [], 'ends' => []];
             foreach ($this->startsByActivity[$uri] ?? [] as $start) {
                 if ($start->time !== null) {
@@ -329,31 +287,7 @@ class RecordIndex
                 'end' => $ends === [] ? null : min($ends),
             ];
         }
-        return $this->activityTimeBounds = $bounds;
-    }
-
-    /** @return list<\Prov\Relation\Specialization> */
-    public function getSpecializations(): array
-    {
-        return $this->specializations;
-    }
-
-    /** @return list<\Prov\Relation\Derivation> */
-    public function getDerivations(): array
-    {
-        return $this->derivations;
-    }
-
-    /** @return list<\Prov\Relation\Membership> */
-    public function getMemberships(): array
-    {
-        return $this->memberships;
-    }
-
-    /** @return list<\Prov\Model\ProvRecord> */
-    public function getRecords(): array
-    {
-        return $this->records;
+        return $bounds;
     }
 
     /**

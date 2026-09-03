@@ -113,7 +113,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
 
         // Declarations for namespaces minted while serializing records. Assigning
         // into the existing 'prefix' key keeps its position in the output.
-        foreach ($minter->getMintedNamespaces() as $ns) {
+        foreach ($minter->mintedNamespaces as $ns) {
             $output['prefix'][$ns->prefix] = $ns->uri;
         }
 
@@ -301,12 +301,12 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
                 $bundles[] = new Bundle(
                     identifier: $this->resolveQName((string) $bundleId, $nsManager),
                     records: $bundleRecords,
-                    namespaces: $bundleNsManager->getRegisteredNamespaces(),
+                    namespaces: $bundleNsManager->registeredNamespaces,
                 );
             }
         }
 
-        return new Document(records: $records, bundles: $bundles, namespaces: $nsManager->getRegisteredNamespaces());
+        return new Document(records: $records, bundles: $bundles, namespaces: $nsManager->registeredNamespaces);
     }
 
     /**

@@ -10,14 +10,27 @@ use Prov\Exception\ConstraintViolationException;
  * The result of running the PROV-CONSTRAINTS validator: either empty
  * (valid) or a list of violations. Chain `throwIfInvalid()` for an
  * exception-based flow, iterate the list directly (it is `IteratorAggregate`),
- * or pull the array via `getViolations()`.
+ * or pull the array via `$violations`.
  *
  * @implements \IteratorAggregate<int, \Prov\Constraint\ConstraintViolation>
  */
 class ConstraintViolationList implements \Countable, \IteratorAggregate
 {
-    /** @var list<\Prov\Constraint\ConstraintViolation> */
-    private array $violations = [];
+    /**
+     * Every violation recorded, in the order the validator found them.
+     *
+     * @var list<\Prov\Constraint\ConstraintViolation>
+     */
+    public private(set) array $violations = [];
+
+    /**
+     * Whether the document passed every implemented check. Unsupported
+     * constraints (see `ConstraintValidator::unsupportedConstraints`)
+     * can still be violated without affecting this result.
+     */
+    public bool $isValid {
+        get => $this->violations === [];
+    }
 
     /**
      * Records a violation. Called by the validator as it checks each rule.
@@ -25,16 +38,6 @@ class ConstraintViolationList implements \Countable, \IteratorAggregate
     public function add(ConstraintViolation $violation): void
     {
         $this->violations[] = $violation;
-    }
-
-    /**
-     * Whether the document passed every implemented check. Unsupported
-     * constraints (see `ConstraintValidator::unsupportedConstraints`)
-     * can still be violated without affecting this result.
-     */
-    public function isValid(): bool
-    {
-        return $this->violations === [];
     }
 
     /**
@@ -47,14 +50,6 @@ class ConstraintViolationList implements \Countable, \IteratorAggregate
         if ($this->violations !== []) {
             throw new ConstraintViolationException($this);
         }
-    }
-
-    /**
-     * @return list<\Prov\Constraint\ConstraintViolation>
-     */
-    public function getViolations(): array
-    {
-        return $this->violations;
     }
 
     /**

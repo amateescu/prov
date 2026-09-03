@@ -233,7 +233,7 @@ class DocumentBuilder extends RecordBuilder
         }
         $bundles = self::standardizeBlankNodesApart($records, $bundles);
 
-        $namespaces = $this->namespaceManager->getRegisteredNamespaces();
+        $namespaces = $this->namespaceManager->registeredNamespaces;
         if (!$this->keepUnusedNamespaces) {
             $usedUris = self::collectReferencedUris($records);
             foreach ($bundles as $bundle) {

@@ -86,7 +86,7 @@ final class PrefixMintingTest extends TestCase
 
         $qn = new ProvNamespace('ex', 'http://example.org/')->qualifiedName('e1');
         $this->assertSame('ex', $minter->prefixFor($qn, $manager));
-        $this->assertSame([], $minter->getMintedNamespaces());
+        $this->assertSame([], $minter->mintedNamespaces);
     }
 
     public function testPrefixForMintsOwnPrefixWhenFree(): void
@@ -97,7 +97,7 @@ final class PrefixMintingTest extends TestCase
         $qn = new ProvNamespace('foo', 'http://foo.example/')->qualifiedName('x');
         $this->assertSame('foo', $minter->prefixFor($qn, $manager));
 
-        $minted = $minter->getMintedNamespaces();
+        $minted = $minter->mintedNamespaces;
         $this->assertCount(1, $minted);
         $this->assertSame('http://foo.example/', $minted[0]->uri);
         $this->assertSame('http://foo.example/', $manager->getNamespace('foo')?->uri);
@@ -125,7 +125,7 @@ final class PrefixMintingTest extends TestCase
         // A different prefix object bound to an already-declared URI.
         $qn = new ProvNamespace('other', 'http://example.org/')->qualifiedName('e1');
         $this->assertSame('ex', $minter->prefixFor($qn, $manager));
-        $this->assertSame([], $minter->getMintedNamespaces());
+        $this->assertSame([], $minter->mintedNamespaces);
     }
 
     public function testPrefixForCachesMintedPrefixPerUri(): void
@@ -137,7 +137,7 @@ final class PrefixMintingTest extends TestCase
         $second = $minter->prefixFor(new ProvNamespace('foo', 'http://foo.example/')->qualifiedName('y'), $manager);
 
         $this->assertSame($first, $second);
-        $this->assertCount(1, $minter->getMintedNamespaces());
+        $this->assertCount(1, $minter->mintedNamespaces);
     }
 
     public function testPrefixForReusesRealPrefixForDefaultSentinelName(): void
@@ -148,7 +148,7 @@ final class PrefixMintingTest extends TestCase
 
         $qn = new ProvNamespace('default', 'http://example.org/')->qualifiedName('e1');
         $this->assertSame('ex', $minter->prefixFor($qn, $manager));
-        $this->assertSame([], $minter->getMintedNamespaces());
+        $this->assertSame([], $minter->mintedNamespaces);
     }
 
     public function testPrefixForMintsRealPrefixForUndeclaredDefaultSentinelName(): void
@@ -175,7 +175,7 @@ final class PrefixMintingTest extends TestCase
 
         $qn = new ProvNamespace('default', 'http://default.example/')->qualifiedName('e1');
         $this->assertSame('e1', $minter->token($qn, $manager));
-        $this->assertSame([], $minter->getMintedNamespaces());
+        $this->assertSame([], $minter->mintedNamespaces);
     }
 
     public function testTokenGivesNameInAnotherScopeDefaultNamespaceARealPrefix(): void
@@ -193,8 +193,8 @@ final class PrefixMintingTest extends TestCase
 
         $inBundle = $minter->token($qn, $bundle);
         $this->assertMatchesRegularExpression('/^ns\d+:e1$/', $inBundle);
-        $this->assertCount(1, $minter->getMintedNamespaces());
-        $this->assertSame('http://document.example/', $minter->getMintedNamespaces()[0]->uri);
+        $this->assertCount(1, $minter->mintedNamespaces);
+        $this->assertSame('http://document.example/', $minter->mintedNamespaces[0]->uri);
     }
 
     public function testTokenKeepsBlankNodeLabel(): void
@@ -203,7 +203,7 @@ final class PrefixMintingTest extends TestCase
         $minter = new PrefixMinter($manager);
 
         $this->assertSame('_:b1', $minter->token(QualifiedName::blankNode('b1'), $manager));
-        $this->assertSame([], $minter->getMintedNamespaces());
+        $this->assertSame([], $minter->mintedNamespaces);
     }
 
     public function testTokenUsesTheEscapedLocalPartItIsGiven(): void

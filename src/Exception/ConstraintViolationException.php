@@ -22,7 +22,7 @@ class ConstraintViolationException extends ProvException
     private function defaultMessage(): string
     {
         $count = count($this->violations);
-        $first = $this->violations->getViolations()[0] ?? null;
+        $first = $this->violations->violations[0] ?? null;
         $summary = $first !== null ? " First: [C{$first->constraintId}] {$first->message}" : '';
         return "Document has {$count} PROV-CONSTRAINTS violation(s).{$summary}";
     }

@@ -46,7 +46,7 @@ class BundleBuilder extends RecordBuilder
             $records = [...$records, ...self::autoDeclaredEntities($records)];
         }
 
-        $namespaces = $this->namespaceManager->getRegisteredNamespaces();
+        $namespaces = $this->namespaceManager->registeredNamespaces;
         if (!$this->keepUnusedNamespaces) {
             $usedUris = self::collectReferencedUris($records);
             $usedUris[$this->identifier->getUri()] = true;

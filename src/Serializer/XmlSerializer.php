@@ -153,7 +153,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         // namespace nodes: a namespace node added after the body is built makes
         // libxml re-resolve every element already in that namespace, and it can
         // then pick an alias prefix a bundle has rebound to another URI.
-        foreach ($minter->getMintedNamespaces() as $ns) {
+        foreach ($minter->mintedNamespaces as $ns) {
             $root->setAttribute('xmlns:' . $ns->prefix, $ns->uri);
         }
 
@@ -621,7 +621,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         }
         assert(is_array($bundles));
 
-        return new Document(records: $records, bundles: $bundles, namespaces: $nsManager->getRegisteredNamespaces());
+        return new Document(records: $records, bundles: $bundles, namespaces: $nsManager->registeredNamespaces);
     }
 
     /**
@@ -936,7 +936,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $bundles[] = new Bundle(
             identifier: $id,
             records: $bundleRecords,
-            namespaces: $bundleNsManager->getRegisteredNamespaces(),
+            namespaces: $bundleNsManager->registeredNamespaces,
         );
     }
 
@@ -1108,12 +1108,8 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $colon = strpos($value, ':');
         if ($colon === false) {
             $defaultUri = $el->lookupNamespaceURI(null);
-            if (
-                $defaultUri === null
-                || $defaultUri === ''
-                || $value === ''
-                || $nsManager->getDefaultNamespace()?->uri === $defaultUri
-            ) {
+            $managerDefaultUri = $nsManager->defaultNamespace?->uri;
+            if ($defaultUri === null || $defaultUri === '' || $value === '' || $managerDefaultUri === $defaultUri) {
                 return $nsManager->resolve($value);
             }
             return $this->namespaceFor($defaultUri, $nsManager, 'default')->qualifiedName($value);
@@ -1137,7 +1133,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
      */
     private function namespaceFor(string $uri, NamespaceManager $nsManager, string $prefix): ProvNamespace
     {
-        foreach ($nsManager->getVisibleNamespaces() as $ns) {
+        foreach ($nsManager->visibleNamespaces as $ns) {
             if ($ns->uri === $uri && $ns->prefix !== 'default') {
                 return $ns;
             }

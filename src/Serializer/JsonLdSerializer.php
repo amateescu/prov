@@ -180,7 +180,7 @@ class JsonLdSerializer implements ProvSerializerInterface
     private function buildContext(NamespaceManager $context): array
     {
         $bindings = [];
-        foreach ($context->getRegisteredNamespaces() as $ns) {
+        foreach ($context->registeredNamespaces as $ns) {
             if ($ns->prefix === 'default') {
                 $bindings['@vocab'] = $ns->uri;
             } else {

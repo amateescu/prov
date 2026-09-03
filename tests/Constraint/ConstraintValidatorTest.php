@@ -44,7 +44,7 @@ final class ConstraintValidatorTest extends TestCase
     public function testEmptyDocumentIsValid(): void
     {
         $v = $this->validate(new DocumentBuilder());
-        $this->assertTrue($v->isValid());
+        $this->assertTrue($v->isValid);
         $v->throwIfInvalid();
     }
 
@@ -84,7 +84,7 @@ final class ConstraintValidatorTest extends TestCase
         $b->wasGeneratedBy(entity: 'ex:e1', activity: 'ex:a1', time: new \DateTimeImmutable('2023-06-15T12:00:00Z'));
         $b->used(activity: 'ex:a1', entity: 'ex:e1', time: new \DateTimeImmutable('2023-06-15T13:00:00Z'));
 
-        $this->assertTrue($this->validate($b)->isValid());
+        $this->assertTrue($this->validate($b)->isValid);
     }
 
     // --- Constraint 51: impossible-unspecified-derivation-generation-use ---
@@ -94,7 +94,7 @@ final class ConstraintValidatorTest extends TestCase
         $b = $this->buildDoc();
         $b->wasDerivedFrom(generatedEntity: 'ex:e2', usedEntity: 'ex:e1', generation: 'ex:g1');
         $v = $this->validate($b);
-        $this->assertFalse($v->isValid());
+        $this->assertFalse($v->isValid);
         $this->assertCount(1, $v->getViolationsByConstraint(51));
     }
 
@@ -116,7 +116,7 @@ final class ConstraintValidatorTest extends TestCase
             generation: 'ex:g1',
             usage: 'ex:u1',
         );
-        $this->assertTrue($this->validate($b)->isValid());
+        $this->assertTrue($this->validate($b)->isValid);
     }
 
     // --- Constraint 52: impossible-specialization-reflexive ---
@@ -133,7 +133,7 @@ final class ConstraintValidatorTest extends TestCase
     {
         $b = $this->buildDoc();
         $b->specializationOf(specificEntity: 'ex:e1', generalEntity: 'ex:e2');
-        $this->assertTrue($this->validate($b)->isValid());
+        $this->assertTrue($this->validate($b)->isValid);
     }
 
     // --- Constraint 55: entity-activity-disjoint ---
@@ -182,7 +182,7 @@ final class ConstraintValidatorTest extends TestCase
             new \DateTimeImmutable('2023-01-01T00:00:00Z'),
             new \DateTimeImmutable('2023-12-31T00:00:00Z'),
         );
-        $this->assertTrue($this->validate($b)->isValid());
+        $this->assertTrue($this->validate($b)->isValid);
     }
 
     public function testConstraint30StartEventAfterEndEventViaFallback(): void
@@ -772,7 +772,7 @@ final class ConstraintValidatorTest extends TestCase
         $b->entity('ex:x');
         $b->activity('ex:x');
         $v = $this->validate($b);
-        $all = $v->getViolations();
+        $all = $v->violations;
         $this->assertNotEmpty($all);
         $this->assertSame($all[0]->constraintName, 'entity-activity-disjoint');
     }
@@ -816,14 +816,17 @@ final class ConstraintValidatorTest extends TestCase
         $doc = $serializer->deserialize(file_get_contents($fixturePath));
         $violations = $this->validator->validate($doc);
 
-        $this->assertTrue($violations->isValid(), sprintf(
-            'Fixture should be valid but has %d violations: %s',
-            count($violations),
-            implode('; ', array_map(
-                static fn($v) => "[C{$v->constraintId}] {$v->message}",
-                $violations->getViolations(),
-            )),
-        ));
+        $this->assertTrue(
+            $violations->isValid,
+            sprintf(
+                'Fixture should be valid but has %d violations: %s',
+                count($violations),
+                implode('; ', array_map(
+                    static fn($v) => "[C{$v->constraintId}] {$v->message}",
+                    $violations->violations,
+                )),
+            ),
+        );
     }
 
     // --- FAIL-DM fixtures should have violations ---
@@ -901,7 +904,7 @@ final class ConstraintValidatorTest extends TestCase
         $bundle->specializationOf(specificEntity: 'ex:e1', generalEntity: 'ex:e1');
 
         $violations = $this->validate($b);
-        $this->assertFalse($violations->isValid());
+        $this->assertFalse($violations->isValid);
         $this->assertCount(1, $violations->getViolationsByConstraint(52));
     }
 
@@ -1031,7 +1034,7 @@ final class ConstraintValidatorTest extends TestCase
     {
         $sigs = array_map(
             static fn($v): string => $v->constraintId . ':' . ($v->recordIdentifier ?? '') . ':' . $v->message,
-            $list->getViolations(),
+            $list->violations,
         );
         sort($sigs);
         return $sigs;

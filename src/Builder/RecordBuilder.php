@@ -81,7 +81,14 @@ abstract class RecordBuilder
     private const string BLANK_PREFIX = '_';
     private const string BLANK_URI = '_:';
 
-    protected NamespaceManager $namespaceManager;
+    /**
+     * The NamespaceManager backing this builder's identifier resolution,
+     * carrying every namespace registered so far. Exposed so a caller
+     * assembling attributes alongside the builder (e.g. an AttributesBuilder
+     * resolving shorthand prefixes) can share this registry instead of
+     * building and re-registering a second, independent one.
+     */
+    public protected(set) NamespaceManager $namespaceManager;
 
     /** @var list<\Prov\Model\ProvRecord> */
     protected array $records = [];
@@ -227,18 +234,6 @@ abstract class RecordBuilder
     {
         $this->namespaceManager->setDefault($ns);
         return $this;
-    }
-
-    /**
-     * The NamespaceManager backing this builder's identifier resolution,
-     * carrying every namespace registered so far. Exposed so a caller
-     * assembling attributes alongside the builder (e.g. an AttributesBuilder
-     * resolving shorthand prefixes) can share this registry instead of
-     * building and re-registering a second, independent one.
-     */
-    public function getNamespaceManager(): NamespaceManager
-    {
-        return $this->namespaceManager;
     }
 
     // --- Elements ---

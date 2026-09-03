@@ -25,8 +25,8 @@ use Prov\Relation\Usage;
  * sharing an identifier across a document, and 31-32, 35, 41-49 require transitive
  * graph reasoning over derivation chains; both kinds of reasoning are deliberately
  * out of scope for this validator. Use `self::unsupportedConstraints()` to discover
- * what's missing; a document that violates only unsupported rules will report
- * isValid() == true.
+ * what's missing; a document that violates only unsupported rules will still
+ * report `$isValid` as true.
  */
 class ConstraintValidator
 {
@@ -94,7 +94,7 @@ class ConstraintValidator
 
     /**
      * PROV-CONSTRAINTS rules that this validator does not check. A document that
-     * only violates these will still report isValid() == true.
+     * only violates these will still report `$isValid` as true.
      *
      * @return list<\Prov\Constraint\ConstraintId>
      */
@@ -145,7 +145,7 @@ class ConstraintValidator
     /** Constraint 51: Derivation can't have generation/usage without activity. */
     private function checkConstraint51(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getDerivations() as $der) {
+        foreach ($index->derivations as $der) {
             if ($der->activity === null && ($der->generation !== null || $der->usage !== null)) {
                 $violations->add(
                     new ConstraintViolation(
@@ -161,7 +161,7 @@ class ConstraintValidator
     /** Constraint 52: Entity can't specialize itself. */
     private function checkConstraint52(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getSpecializations() as $spec) {
+        foreach ($index->specializations as $spec) {
             if ($spec->specificEntity->getUri() === $spec->generalEntity->getUri()) {
                 $violations->add(
                     new ConstraintViolation(
@@ -181,7 +181,7 @@ class ConstraintValidator
         // attribution) is not an event and may legitimately share an identifier with one.
         $eventClasses = [Generation::class, Usage::class, Start::class, End::class, Invalidation::class];
         $seen = [];
-        foreach ($index->getRecords() as $record) {
+        foreach ($index->records as $record) {
             if (!$record instanceof ProvRelation) {
                 continue;
             }
@@ -213,7 +213,7 @@ class ConstraintValidator
     private function checkConstraint54(RecordIndex $index, ConstraintViolationList $violations): void
     {
         $checked = [];
-        foreach ($index->getRecords() as $record) {
+        foreach ($index->records as $record) {
             if ($record->identifier === null) {
                 continue;
             }
@@ -241,7 +241,7 @@ class ConstraintValidator
     private function checkConstraint55(RecordIndex $index, ConstraintViolationList $violations): void
     {
         $checked = [];
-        foreach ($index->getRecords() as $record) {
+        foreach ($index->records as $record) {
             if ($record->identifier === null) {
                 continue;
             }
@@ -269,7 +269,7 @@ class ConstraintValidator
     /** Constraint 56: Empty collection can't have members. */
     private function checkConstraint56(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getMemberships() as $mem) {
+        foreach ($index->memberships as $mem) {
             if ($mem->collection === null) {
                 continue;
             }
@@ -297,7 +297,7 @@ class ConstraintValidator
     private function checkConstraint24(RecordIndex $index, ConstraintViolationList $violations): void
     {
         $groups = [];
-        foreach ($index->getGenerations() as $record) {
+        foreach ($index->generations as $record) {
             if ($record->activity === null) {
                 continue;
             }
@@ -315,7 +315,7 @@ class ConstraintValidator
     private function checkConstraint25(RecordIndex $index, ConstraintViolationList $violations): void
     {
         $groups = [];
-        foreach ($index->getInvalidations() as $record) {
+        foreach ($index->invalidations as $record) {
             if ($record->activity === null) {
                 continue;
             }
@@ -333,7 +333,7 @@ class ConstraintValidator
     private function checkConstraint26(RecordIndex $index, ConstraintViolationList $violations): void
     {
         $groups = [];
-        foreach ($index->getStarts() as $record) {
+        foreach ($index->starts as $record) {
             if ($record->activity === null) {
                 continue;
             }
@@ -352,7 +352,7 @@ class ConstraintValidator
     private function checkConstraint27(RecordIndex $index, ConstraintViolationList $violations): void
     {
         $groups = [];
-        foreach ($index->getEnds() as $record) {
+        foreach ($index->ends as $record) {
             if ($record->activity === null) {
                 continue;
             }
@@ -430,7 +430,7 @@ class ConstraintValidator
         /** @var array<string, array<string, true>> $roles URI to set of roles. */
         $roles = [];
 
-        foreach ($index->getRecords() as $record) {
+        foreach ($index->records as $record) {
             if ($record instanceof Entity && $record->identifier !== null) {
                 $roles[$record->identifier->getUri()]['entity'] = true;
             } elseif ($record instanceof Activity && $record->identifier !== null) {
@@ -496,7 +496,7 @@ class ConstraintValidator
     /** Constraint 28: Activity startTime must match its start event time. */
     private function checkConstraint28(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getActivities() as $record) {
+        foreach ($index->activities as $record) {
             $identifier = $record->identifier;
             if ($identifier === null || $record->startTime === null) {
                 continue;
@@ -519,7 +519,7 @@ class ConstraintValidator
     /** Constraint 29: Activity endTime must match its end event time. */
     private function checkConstraint29(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getActivities() as $record) {
+        foreach ($index->activities as $record) {
             $identifier = $record->identifier;
             if ($identifier === null || $record->endTime === null) {
                 continue;
@@ -544,7 +544,7 @@ class ConstraintValidator
     {
         // An anonymous activity is its own statement: only its own startTime
         // and endTime can order it.
-        foreach ($index->getActivities() as $record) {
+        foreach ($index->activities as $record) {
             if (
                 $record->identifier === null
                 && $record->startTime !== null
@@ -563,7 +563,7 @@ class ConstraintValidator
         // declaration's times and every start/end event folded in. Every start
         // must precede every end, so the latest start may not follow the
         // earliest end, independent of record order.
-        foreach ($index->getActivityTimeBounds() as $uri => ['start' => $start, 'end' => $end]) {
+        foreach ($index->activityTimeBounds as $uri => ['start' => $start, 'end' => $end]) {
             if ($start !== null && $end !== null && $start > $end) {
                 $violations->add(
                     new ConstraintViolation(
@@ -585,8 +585,8 @@ class ConstraintValidator
      */
     private function checkConstraint33(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        $bounds = $index->getActivityTimeBounds();
-        foreach ($index->getUsages() as $record) {
+        $bounds = $index->activityTimeBounds;
+        foreach ($index->usages as $record) {
             if ($record->activity === null || $record->time === null) {
                 continue;
             }
@@ -623,8 +623,8 @@ class ConstraintValidator
      */
     private function checkConstraint34(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        $bounds = $index->getActivityTimeBounds();
-        foreach ($index->getGenerations() as $record) {
+        $bounds = $index->activityTimeBounds;
+        foreach ($index->generations as $record) {
             if ($record->activity === null || $record->time === null) {
                 continue;
             }
@@ -657,7 +657,7 @@ class ConstraintValidator
     /** Constraint 36: Generation must precede invalidation for the same entity. */
     private function checkConstraint36(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getEntityUrisWithEvents() as $uri) {
+        foreach ($index->entityUrisWithEvents as $uri) {
             $gens = $this->eventTimes($index->getGenerationsForEntity($uri));
             $invs = $this->eventTimes($index->getInvalidationsForEntity($uri));
             if ($gens === [] || $invs === []) {
@@ -678,7 +678,7 @@ class ConstraintValidator
     /** Constraint 37: Generation must precede usage for the same entity. */
     private function checkConstraint37(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getEntityUrisWithEvents() as $uri) {
+        foreach ($index->entityUrisWithEvents as $uri) {
             $gens = $this->eventTimes($index->getGenerationsForEntity($uri));
             $usages = $this->eventTimes($index->getUsagesForEntity($uri));
             if ($gens === [] || $usages === []) {
@@ -699,7 +699,7 @@ class ConstraintValidator
     /** Constraint 38: Usage must precede invalidation for the same entity. */
     private function checkConstraint38(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getEntityUrisWithEvents() as $uri) {
+        foreach ($index->entityUrisWithEvents as $uri) {
             $usages = $this->eventTimes($index->getUsagesForEntity($uri));
             $invs = $this->eventTimes($index->getInvalidationsForEntity($uri));
             if ($usages === [] || $invs === []) {
@@ -742,7 +742,7 @@ class ConstraintValidator
      */
     private function checkConstraint39(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getEntityUrisWithEvents() as $uri) {
+        foreach ($index->entityUrisWithEvents as $uri) {
             // Deduplicate by generation ID (scruffy duplicates share an ID).
             // Key times by "U.u" (Unix timestamp + microseconds) for timezone-independent
             // value comparison; two DateTimeImmutable instances for the same instant
@@ -777,7 +777,7 @@ class ConstraintValidator
      */
     private function checkConstraint40(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        foreach ($index->getEntityUrisWithEvents() as $uri) {
+        foreach ($index->entityUrisWithEvents as $uri) {
             $timesByInvId = [];
             foreach ($index->getInvalidationsForEntity($uri) as $inv) {
                 if ($inv->time === null) {

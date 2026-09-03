@@ -26,7 +26,7 @@ final class JsonScannerTest extends TestCase
     {
         $scanner = new JsonScanner('{"prefix":{"ex":"http://example.org/"},"entity":{"ex:e1":{}}}');
 
-        $namespaces = $scanner->namespaces();
+        $namespaces = $scanner->namespaces;
         $this->assertSame('http://example.org/', $namespaces['ex']);
         $this->assertSame('http://www.w3.org/ns/prov#', $namespaces['prov']);
         $this->assertSame('http://www.w3.org/2001/XMLSchema#', $namespaces['xsd']);

@@ -32,6 +32,38 @@ class NamespaceManager
 
     private ?ProvNamespace $default = null;
 
+    /**
+     * The namespaces declared at this level alone, without inherited ones.
+     *
+     * @var list<\Prov\Identifier\ProvNamespace>
+     */
+    public array $registeredNamespaces {
+        get => array_values($this->namespaces);
+    }
+
+    /**
+     * Every namespace visible from here: this manager's own declarations plus
+     * the ones it inherits from its parents. A prefix declared at this level
+     * shadows the parent binding, so only the visible binding is listed.
+     * `$registeredNamespaces` lists this level's declarations alone.
+     *
+     * @var list<\Prov\Identifier\ProvNamespace>
+     */
+    public array $visibleNamespaces {
+        get => array_values($this->getAllNamespaces());
+    }
+
+    /**
+     * The default namespace in scope here: this manager's own, or the nearest
+     * one inherited from a parent. Null when no default is declared anywhere in
+     * the chain. Serializers need it to decide whether a name carrying the
+     * reserved `default` prefix can be written bare in the current scope.
+     * Assigned through `setDefault()`, which also registers the namespace.
+     */
+    public ?ProvNamespace $defaultNamespace {
+        get => $this->default ?? $this->parent?->defaultNamespace;
+    }
+
     public function __construct(
         private ?NamespaceManager $parent = null,
     ) {
@@ -234,7 +266,7 @@ class NamespaceManager
             );
         }
 
-        $default = $this->getDefaultNamespace();
+        $default = $this->defaultNamespace;
         if ($default === null) {
             throw new NamespaceException("No default namespace set for unprefixed identifier '{$shorthand}'.");
         }
@@ -320,37 +352,5 @@ class NamespaceManager
     public function getNamespace(string $prefix): ?ProvNamespace
     {
         return $this->namespaces[$prefix] ?? $this->parent?->getNamespace($prefix);
-    }
-
-    /**
-     * @return list<\Prov\Identifier\ProvNamespace>
-     */
-    public function getRegisteredNamespaces(): array
-    {
-        return array_values($this->namespaces);
-    }
-
-    /**
-     * Every namespace visible from here: this manager's own declarations plus
-     * the ones it inherits from its parents. A prefix declared at this level
-     * shadows the parent binding, so only the visible binding is listed.
-     * `getRegisteredNamespaces()` returns this level's declarations alone.
-     *
-     * @return list<\Prov\Identifier\ProvNamespace>
-     */
-    public function getVisibleNamespaces(): array
-    {
-        return array_values($this->getAllNamespaces());
-    }
-
-    /**
-     * The default namespace in scope here: this manager's own, or the nearest
-     * one inherited from a parent. Null when no default is declared anywhere in
-     * the chain. Serializers need it to decide whether a name carrying the
-     * reserved `default` prefix can be written bare in the current scope.
-     */
-    public function getDefaultNamespace(): ?ProvNamespace
-    {
-        return $this->default ?? $this->parent?->getDefaultNamespace();
     }
 }

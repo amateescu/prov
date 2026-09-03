@@ -26,8 +26,10 @@ final class BlankLabelMinter
 
     private int $counter = 0;
 
-    /** @var array<string, bool>|null Blank labels the document already uses; collected lazily. */
-    private ?array $usedLabels = null;
+    /** @var array<string, bool> Blank labels the document already uses; collected on first read. */
+    private array $usedLabels {
+        get => $this->usedLabels ??= $this->collectUsedLabels();
+    }
 
     public function __construct(
         private readonly Document $document,
@@ -46,7 +48,6 @@ final class BlankLabelMinter
 
     private function mint(): string
     {
-        $this->usedLabels ??= $this->collectUsedLabels();
         $used = $this->usedLabels;
         do {
             $label = '_:b' . ++$this->counter;

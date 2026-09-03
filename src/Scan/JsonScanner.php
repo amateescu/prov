@@ -88,23 +88,29 @@ final class JsonScanner
     private readonly NamespaceManager $nsManager;
 
     /**
-     * @var ?list<array{section: string, id: string, body: array<array-key, mixed>}>
-     *   Every relation record, in scan order; null until the endpoint index is built.
+     * @var list<array{section: string, id: string, body: array<array-key, mixed>}>
+     *   Every relation record, in scan order. Built on first read, together
+     *   with `$byEndpoint`.
      */
-    private ?array $relationLocators = null;
+    private array $relationLocators {
+        get => $this->relationLocators ??= $this->buildEndpointIndex();
+    }
 
     /**
      * @var array<string, list<int>>
      *   Endpoint URI => indexes into `$relationLocators`. Empty and meaningless
-     *   until `$relationLocators` is set.
+     *   until `$relationLocators` is first read.
      */
     private array $byEndpoint = [];
 
     /**
-     * @var ?array<string, list<array{responsibleRaw: string, responsibleUri: string, activityUri: ?string}>>
-     *   Delegate URI => its outgoing delegation edges, in document order; null until built.
+     * @var array<string, list<array{responsibleRaw: string, responsibleUri: string, activityUri: ?string}>>
+     *   Delegate URI => its outgoing delegation edges, in document order. Built
+     *   on first read.
      */
-    private ?array $delegationsByDelegate = null;
+    private array $delegationsByDelegate {
+        get => $this->delegationsByDelegate ??= $this->buildDelegationIndex();
+    }
 
     /** @var array<string, array<string, string>> Section name => (record URI => raw id key). */
     private array $sectionUriIndexes = [];
@@ -114,6 +120,23 @@ final class JsonScanner
 
     /** @var array<string, list<string>> Section name => its reference-typed formal PROV-JSON keys. */
     private array $refKeysCache = [];
+
+    /**
+     * The document's namespace table as `prefix => uri`. Includes the default
+     * namespace (under the reserved `default` prefix) and the prov/xsd
+     * built-ins, so it is the table the scanner actually resolves against.
+     *
+     * @var array<string, string>
+     */
+    public array $namespaces {
+        get {
+            $out = [];
+            foreach ($this->nsManager->registeredNamespaces as $ns) {
+                $out[$ns->prefix] = $ns->uri;
+            }
+            return $out;
+        }
+    }
 
     /**
      * @throws \Prov\Exception\DeserializationException
@@ -135,22 +158,6 @@ final class JsonScanner
         $this->json = $decoded;
         $this->nsManager = $this->buildNamespaceTable($decoded['prefix'] ?? []);
         $this->assertSectionsAreMaps($decoded);
-    }
-
-    /**
-     * The document's namespace table as `prefix => uri`. Includes the default
-     * namespace (under the reserved `default` prefix) and the prov/xsd
-     * built-ins, so it is the table the scanner actually resolves against.
-     *
-     * @return array<string, string>
-     */
-    public function namespaces(): array
-    {
-        $out = [];
-        foreach ($this->nsManager->getRegisteredNamespaces() as $ns) {
-            $out[$ns->prefix] = $ns->uri;
-        }
-        return $out;
     }
 
     /**
@@ -332,7 +339,7 @@ final class JsonScanner
      */
     public function relationsReferencing(QualifiedName|string $identifier): array
     {
-        $locators = $this->relationLocators ?? $this->buildEndpointIndex();
+        $locators = $this->relationLocators;
         $out = [];
         foreach ($this->byEndpoint[$this->toUri($identifier)] ?? [] as $locatorIndex) {
             $locator = $locators[$locatorIndex];
@@ -678,7 +685,7 @@ final class JsonScanner
      * endpoint URI.
      *
      * @return list<array{section: string, id: string, body: array<array-key, mixed>}>
-     *   The relation locators, also stored on the scanner for reuse.
+     *   The relation locators; `$byEndpoint` is filled as a side effect.
      */
     private function buildEndpointIndex(): array
     {
@@ -723,7 +730,6 @@ final class JsonScanner
                 }
             }
         }
-        $this->relationLocators = $locators;
         $this->byEndpoint = $index;
         return $locators;
     }
@@ -798,10 +804,6 @@ final class JsonScanner
      */
     private function delegationChain(string $agent, string $activityUri): array
     {
-        if ($this->delegationsByDelegate === null) {
-            $this->buildDelegationIndex();
-        }
-
         $chain = [];
         $currentUri = $this->toUri($agent);
         $seen = [$currentUri => true];
@@ -827,8 +829,10 @@ final class JsonScanner
     /**
      * Indexes `actedOnBehalfOf` edges by the delegate's URI, in document order,
      * so `delegationChain()` can follow them without rescanning the section.
+     *
+     * @return array<string, list<array{responsibleRaw: string, responsibleUri: string, activityUri: ?string}>>
      */
-    private function buildDelegationIndex(): void
+    private function buildDelegationIndex(): array
     {
         $index = [];
         foreach ($this->section('actedOnBehalfOf') as $raw) {
@@ -848,7 +852,7 @@ final class JsonScanner
                 ];
             }
         }
-        $this->delegationsByDelegate = $index;
+        return $index;
     }
 
     /**

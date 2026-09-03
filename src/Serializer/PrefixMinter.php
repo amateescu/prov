@@ -17,7 +17,7 @@ use Prov\Identifier\QualifiedName;
  * otherwise serialize as a bare URI, producing unparseable PROV-N/PROV-JSON
  * output and broken XML element names. Minted namespaces are registered on
  * the document-level NamespaceManager (so bundle-level lookups chain to
- * them) and reported via `getMintedNamespaces()` so serializers can emit
+ * them) and reported via `$mintedNamespaces` so serializers can emit
  * the matching declarations.
  *
  * Every method takes the namespace scope the name is written in: the document
@@ -40,6 +40,23 @@ final class PrefixMinter
      * @var array<string, list<\Prov\Identifier\ProvNamespace>>
      */
     private array $minted = [];
+
+    /**
+     * The namespaces minted so far, for emission as prefix declarations.
+     *
+     * @var list<\Prov\Identifier\ProvNamespace>
+     */
+    public array $mintedNamespaces {
+        get {
+            $out = [];
+            foreach ($this->minted as $namespaces) {
+                foreach ($namespaces as $ns) {
+                    $out[] = $ns;
+                }
+            }
+            return $out;
+        }
+    }
 
     /**
      * Resolved prefixFor() results per scope, keyed by "prefix\0uri". A scope
@@ -77,7 +94,7 @@ final class PrefixMinter
         $localPart ??= $qn->localPart;
 
         if ($ns->prefix === 'default') {
-            if ($scope->getDefaultNamespace()?->uri === $ns->uri) {
+            if ($scope->defaultNamespace?->uri === $ns->uri) {
                 return $localPart;
             }
             return $this->prefixFor($qn, $scope) . ':' . $localPart;
@@ -181,7 +198,7 @@ final class PrefixMinter
         }
 
         // Any other visible declaration of the URI beats declaring an alias.
-        foreach ($scope->getVisibleNamespaces() as $visible) {
+        foreach ($scope->visibleNamespaces as $visible) {
             if ($visible->uri === $ns->uri && $visible->prefix !== 'default') {
                 return $visible->prefix;
             }
@@ -189,22 +206,6 @@ final class PrefixMinter
 
         $prefix = $this->isFree($ns->prefix, $scope) ? $ns->prefix : $this->mintPrefix($ns->uri, $scope);
         return $this->declare(new ProvNamespace($prefix, $ns->uri))->prefix;
-    }
-
-    /**
-     * The namespaces minted so far, for emission as prefix declarations.
-     *
-     * @return list<\Prov\Identifier\ProvNamespace>
-     */
-    public function getMintedNamespaces(): array
-    {
-        $out = [];
-        foreach ($this->minted as $namespaces) {
-            foreach ($namespaces as $ns) {
-                $out[] = $ns;
-            }
-        }
-        return $out;
     }
 
     /**

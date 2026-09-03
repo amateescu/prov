@@ -117,7 +117,7 @@ class ProvNSerializer implements ProvSerializerInterface
         $lines = [];
         $lines[] = 'document';
 
-        $namespaces = OutputOrder::namespaces([...$document->namespaces, ...$minter->getMintedNamespaces()]);
+        $namespaces = OutputOrder::namespaces([...$document->namespaces, ...$minter->mintedNamespaces]);
         $declarations = $this->namespaceDeclarations($namespaces, $indent);
         if ($declarations !== []) {
             $lines = array_merge($lines, $declarations);
