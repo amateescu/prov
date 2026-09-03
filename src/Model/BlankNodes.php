@@ -89,6 +89,36 @@ final class BlankNodes
     }
 
     /**
+     * A fresh name for every colliding label, so two containers that both used
+     * a label end up with one node each.
+     *
+     * Each rename picks the lowest `_:bN` no side uses. Callers rewrite one
+     * side's records through the result; labels outside `$colliding` are left
+     * alone, so records that did not collide keep their names.
+     *
+     * @param array<string, true> $colliding
+     *   The label URIs to rename, as `_:label` keys.
+     * @param array<string, true> $taken
+     *   Every label URI in play on either side, as `_:label` keys.
+     *
+     * @return array<string, \Prov\Identifier\QualifiedName>
+     *   Old label URI => the blank name to use instead.
+     */
+    public static function renames(array $colliding, array $taken): array
+    {
+        $renames = [];
+        $next = 1;
+        foreach (array_keys($colliding) as $label) {
+            do {
+                $fresh = 'b' . $next++;
+            } while (isset($taken['_:' . $fresh]));
+            $taken['_:' . $fresh] = true;
+            $renames[$label] = QualifiedName::blankNode($fresh);
+        }
+        return $renames;
+    }
+
+    /**
      * The set of blank-node label URIs (`_:b1`, ...) the records use, in any
      * position.
      *

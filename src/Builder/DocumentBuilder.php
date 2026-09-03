@@ -9,6 +9,8 @@ use Prov\Document;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\BlankNodes;
+use Prov\Model\ProvRecord;
+use Prov\Model\RecordRewriter;
 
 /**
  * Fluent builder for assembling a Document: add records (entities,
@@ -99,17 +101,55 @@ class DocumentBuilder extends RecordBuilder
      * Attaches an already-built Bundle to the document. Useful when a
      * Bundle is constructed outside the fluent flow (e.g. deserialized).
      *
-     * The bundle mints its own `_:bN` labels outside this builder's blank()
-     * sequence, so advance the counter past the highest one it uses. Without
-     * that, a later blank() call could mint a label the bundle already uses,
-     * and flatten() would then merge two unrelated anonymous records when it
-     * lifts the bundle's records to document level without renaming.
+     * The bundle labels its blank nodes outside this builder's blank()
+     * sequence, so a label it uses can already name an unrelated record here,
+     * and a later blank() call could mint one it uses. flatten() lifts bundle
+     * records to document level without renaming, which would merge the two.
+     * Both directions are closed here: a label this builder already holds is
+     * renamed in the incoming bundle, and the counter moves past every label
+     * the bundle keeps.
      */
     public function addBundle(Bundle $bundle): static
     {
+        $bundle = $this->standardizeBlankNodesApart($bundle);
         $this->advanceBlankNodeCounterPast($this->maxBlankNodeNumber($bundle->records));
         $this->bundles[] = $bundle;
         return $this;
+    }
+
+    /**
+     * Returns `$bundle` with every blank label this builder already holds
+     * renamed to one nothing in play uses.
+     *
+     * The labels in play are the ones this builder's own records use plus the
+     * ones its attached bundles use. Labels unique to the incoming bundle are
+     * left alone, so records that did not collide keep their names.
+     */
+    private function standardizeBlankNodesApart(Bundle $bundle): Bundle
+    {
+        $used = BlankNodes::labels($this->records);
+        foreach ($this->bundles as $attached) {
+            $used += BlankNodes::labels($attached->records);
+        }
+        if ($used === []) {
+            return $bundle;
+        }
+
+        $incoming = BlankNodes::labels($bundle->records);
+        $colliding = array_intersect_key($incoming, $used);
+        if ($colliding === []) {
+            return $bundle;
+        }
+
+        $renames = BlankNodes::renames($colliding, $used + $incoming);
+        $mapName = static fn(QualifiedName $qn): QualifiedName => $renames[$qn->getUri()] ?? $qn;
+        $rebuild = static fn(ProvRecord $record): ProvRecord => RecordRewriter::rebuild($record, $mapName);
+
+        return new Bundle(
+            identifier: $bundle->identifier,
+            records: array_map($rebuild, $bundle->records),
+            namespaces: $bundle->namespaces,
+        );
     }
 
     /**

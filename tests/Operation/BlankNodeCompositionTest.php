@@ -260,6 +260,103 @@ final class BlankNodeCompositionTest extends TestCase
         $this->assertSame(['_:b1' => true, '_:b9' => true], BlankNodes::labels($merged->records));
     }
 
+    public function testAddBundleKeepsALabelTheDocumentAlreadyUsesApart(): void
+    {
+        $builder = new DocumentBuilder([$this->ex]);
+        $blank = $builder->blank();
+        $builder->entity($blank);
+        $builder->specializationOf(specificEntity: $blank, generalEntity: $this->ex->qualifiedName('a'));
+
+        $shared = QualifiedName::blankNode('b1');
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [
+                new Entity($shared),
+                new Specialization(null, $shared, $this->ex->qualifiedName('b')),
+            ],
+            namespaces: [],
+        ));
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $neighbours = $this->neighboursByBlank($flat);
+        $this->assertCount(2, $neighbours, 'The document and the bundle node were merged into one.');
+        $lists = array_values($neighbours);
+        sort($lists);
+        $this->assertSame(
+            [
+                ['http://example.org/a'],
+                ['http://example.org/b'],
+            ],
+            $lists,
+        );
+    }
+
+    /**
+     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Model\ProvRecord $make
+     */
+    #[DataProvider('blankReferencePositions')]
+    public function testAddBundleRenamesBlankLabelsInEveryPosition(callable $make): void
+    {
+        $builder = new DocumentBuilder([$this->ex]);
+        $builder->entity($builder->blank());
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [$make(QualifiedName::blankNode('b1'))],
+            namespaces: [],
+        ));
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $this->assertCount(2, BlankNodes::labels($flat->records), 'Two independent nodes kept a single label.');
+    }
+
+    public function testAddBundleRenamesNonNumericBlankLabels(): void
+    {
+        $builder = new DocumentBuilder([$this->ex]);
+        $builder->entity(QualifiedName::blankNode('shared'));
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [new Entity(QualifiedName::blankNode('shared'))],
+            namespaces: [],
+        ));
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $this->assertCount(2, BlankNodes::labels($flat->records), 'Two independent nodes kept a single label.');
+    }
+
+    public function testAddBundleKeepsTwoAttachedBundlesApart(): void
+    {
+        $builder = new DocumentBuilder([$this->ex]);
+        foreach (['one', 'two'] as $name) {
+            $builder->addBundle(new Bundle(
+                identifier: $this->ex->qualifiedName($name),
+                records: [new Entity(QualifiedName::blankNode('b1'))],
+                namespaces: [],
+            ));
+        }
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $this->assertCount(2, BlankNodes::labels($flat->records), 'Two independent nodes kept a single label.');
+    }
+
+    public function testAddBundleLeavesNonCollidingBlankLabelsAlone(): void
+    {
+        $builder = new DocumentBuilder([$this->ex]);
+        $builder->entity($builder->blank());
+        $builder->addBundle(new Bundle(
+            identifier: $this->ex->qualifiedName('bundle'),
+            records: [new Entity(QualifiedName::blankNode('b9'))],
+            namespaces: [],
+        ));
+
+        $flat = DocumentOperations::flatten($builder->build());
+
+        $this->assertSame(['_:b1' => true, '_:b9' => true], BlankNodes::labels($flat->records));
+    }
+
     public function testFlattenAfterAddBundleKeepsBlankValuesIndependent(): void
     {
         $bundle = new Bundle(

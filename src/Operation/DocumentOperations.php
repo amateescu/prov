@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Prov\Operation;
 
-use Prov\Attribute\Attributes;
-use Prov\Attribute\Literal;
 use Prov\Bundle;
 use Prov\Document;
 use Prov\Exception\NamespaceException;
@@ -14,7 +12,7 @@ use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\BlankNodes;
 use Prov\Model\ProvRecord;
-use Prov\Relation\Dictionary\DictionaryEntry;
+use Prov\Model\RecordRewriter;
 use Prov\Relation\Mention;
 
 /**
@@ -32,11 +30,12 @@ final class DocumentOperations
      * Call `self::flattenDroppingMentions()` to discard them instead.
      *
      * Known limitation: blank-node labels are container-scoped, and flattening
-     * does not rename them. Documents built with DocumentBuilder are safe (a
-     * document and its bundles share one label sequence), but a deserialized
-     * document that reuses a label (e.g. `_:b1`) in both the document and a
-     * bundle will have those unrelated records silently identified after
-     * flattening.
+     * does not rename them. A document assembled through DocumentBuilder is
+     * safe (a document and its bundles share one label sequence, and
+     * `addBundle()` renames an incoming bundle's colliding labels), as is a
+     * document from `merge()`. A Document built by hand that reuses a label
+     * (say `_:b1`) in both the document and a bundle will have those unrelated
+     * records identified after flattening.
      *
      * @throws \Prov\Exception\ProvException
      *   If any Mention record is present.
@@ -113,7 +112,10 @@ final class DocumentOperations
         // namespace (the common case).
         if ($remapped) {
             $mapName = static fn(QualifiedName $qn): QualifiedName => self::remapQn($qn, $byUri);
-            $records = array_map(static fn(ProvRecord $r): ProvRecord => self::rebuildRecord($r, $mapName), $records);
+            $records = array_map(static fn(ProvRecord $r): ProvRecord => RecordRewriter::rebuild(
+                $r,
+                $mapName,
+            ), $records);
         }
 
         return new Document(records: $records, bundles: [], namespaces: array_values($byUri));
@@ -164,59 +166,6 @@ final class DocumentOperations
     }
 
     /**
-     * Rebuilds a record with every QualifiedName it references passed through
-     * `$mapName`. Reconstructed via the constructor using named arguments
-     * (public readonly property names match the constructor parameters), so each
-     * record type is handled without a per-type branch.
-     *
-     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
-     */
-    private static function rebuildRecord(ProvRecord $record, callable $mapName): ProvRecord
-    {
-        /** @var array<string, mixed> $args */
-        $args = [];
-        // @mago-expect analysis:mixed-assignment
-        foreach (get_object_vars($record) as $name => $value) {
-            $args[$name] = self::rebuildValue($value, $mapName);
-        }
-        try {
-            $new = new \ReflectionClass($record)->newInstanceArgs($args);
-        } catch (\ReflectionException $e) {
-            // Every record's public property names match its constructor
-            // parameters, so reconstruction by named argument cannot fail here.
-            throw new \LogicException('Could not rebuild record.', previous: $e);
-        }
-        assert($new instanceof ProvRecord);
-        return $new;
-    }
-
-    /**
-     * Rebuilds any QualifiedName reachable from a record property value
-     * (identifiers, formal endpoints, attribute bags, dictionary entries).
-     *
-     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
-     */
-    private static function rebuildValue(mixed $value, callable $mapName): mixed
-    {
-        if ($value instanceof QualifiedName) {
-            return $mapName($value);
-        }
-        if ($value instanceof Attributes) {
-            return self::rebuildAttributes($value, $mapName);
-        }
-        if ($value instanceof DictionaryEntry) {
-            return new DictionaryEntry(
-                self::rebuildDictKey($value->key, $mapName),
-                $value->entity !== null ? $mapName($value->entity) : null,
-            );
-        }
-        if (is_array($value)) {
-            return array_map(static fn(mixed $item): mixed => self::rebuildValue($item, $mapName), $value);
-        }
-        return $value;
-    }
-
-    /**
      * @param array<string, \Prov\Identifier\ProvNamespace> $byUri
      */
     private static function remapQn(QualifiedName $qn, array $byUri): QualifiedName
@@ -226,68 +175,6 @@ final class DocumentOperations
             return $qn;
         }
         return new QualifiedName($canonical, $qn->localPart);
-    }
-
-    /**
-     * Rebuilds a dictionary entry key, preserving its declared value union.
-     *
-     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
-     */
-    private static function rebuildDictKey(
-        QualifiedName|Literal|string|int|float|bool|null $key,
-        callable $mapName,
-    ): QualifiedName|Literal|string|int|float|bool|null {
-        if ($key instanceof QualifiedName) {
-            return $mapName($key);
-        }
-        if ($key instanceof Literal) {
-            return self::rebuildLiteral($key, $mapName);
-        }
-        return $key;
-    }
-
-    /**
-     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
-     */
-    private static function rebuildAttributes(Attributes $attributes, callable $mapName): Attributes
-    {
-        if ($attributes->isEmpty()) {
-            return $attributes;
-        }
-        $pairs = [];
-        foreach ($attributes as $key => $value) {
-            $pairs[] = [$mapName($key), self::rebuildAttrValue($value, $mapName)];
-        }
-        return Attributes::from($pairs);
-    }
-
-    /**
-     * Rebuilds an attribute value, preserving its declared value union.
-     *
-     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
-     */
-    private static function rebuildAttrValue(
-        QualifiedName|Literal|string|int|float|bool $value,
-        callable $mapName,
-    ): QualifiedName|Literal|string|int|float|bool {
-        if ($value instanceof QualifiedName) {
-            return $mapName($value);
-        }
-        if ($value instanceof Literal) {
-            return self::rebuildLiteral($value, $mapName);
-        }
-        return $value;
-    }
-
-    /**
-     * @param callable(\Prov\Identifier\QualifiedName): \Prov\Identifier\QualifiedName $mapName
-     */
-    private static function rebuildLiteral(Literal $literal, callable $mapName): Literal
-    {
-        if ($literal->datatype === null) {
-            return $literal;
-        }
-        return new Literal($literal->value, $mapName($literal->datatype), $literal->languageTag);
     }
 
     /**
@@ -380,20 +267,9 @@ final class DocumentOperations
             return $b;
         }
 
-        $taken = $usedInA + $usedInB;
-        /** @var array<string, \Prov\Identifier\QualifiedName> $renames */
-        $renames = [];
-        $next = 1;
-        foreach (array_keys($colliding) as $label) {
-            do {
-                $fresh = 'b' . $next++;
-            } while (isset($taken['_:' . $fresh]));
-            $taken['_:' . $fresh] = true;
-            $renames[$label] = QualifiedName::blankNode($fresh);
-        }
-
+        $renames = BlankNodes::renames($colliding, $usedInA + $usedInB);
         $mapName = static fn(QualifiedName $qn): QualifiedName => $renames[$qn->getUri()] ?? $qn;
-        $rebuild = static fn(ProvRecord $r): ProvRecord => self::rebuildRecord($r, $mapName);
+        $rebuild = static fn(ProvRecord $r): ProvRecord => RecordRewriter::rebuild($r, $mapName);
 
         $bundles = [];
         foreach ($b->bundles as $bundle) {
