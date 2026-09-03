@@ -90,6 +90,8 @@ The `prov` and `xsd` prefixes are implicit in PROV-N and the grammar forbids red
 
 PROV-O models `specializationOf`, `alternateOf`, `hadMember`, and `mentionOf` as plain object properties, and PROV-Dictionary does the same for `hadDictionaryMember`. A statement in one of those forms is a single triple on the subject node, with no node of its own, so there is nowhere to write a relation identifier or extra attributes. Serializing a document whose record carries either throws `Prov\Exception\ProvException` rather than writing the triple without them. Every other relation has a qualified form (`prov:qualifiedGeneration`, `prov:qualifiedInsertion`, ...) that carries both.
 
+A relation is written as a property of its subject node, so a relation whose subject formal is missing has no node to hang on. One that carries an identifier, attributes, or another formal throws `Prov\Exception\ProvException`; one that carries nothing else states nothing and is dropped. A relation that has its subject but no object formal keeps its qualified form, which PROV-O allows without the object, so nothing is lost. The five relations above have no qualified form, so a missing object throws there too.
+
 The whole document shares one `@context`. Bundle declarations are promoted into it when their prefix is free there; a bundle prefix that rebinds a document prefix cannot be, and names under it are written with a minted prefix instead, so every compact IRI expands to the URI the model carries.
 
 ## Document operations

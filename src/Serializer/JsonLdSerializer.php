@@ -226,15 +226,17 @@ class JsonLdSerializer implements ProvSerializerInterface
      * attributes, or secondary formals, and as a plain object property
      * otherwise. The encoding is table-driven by RelationMetadata::JSONLD.
      *
-     * A relation whose subject formal is null is omitted from the output:
      * JSON-LD attaches a relation as a property of its subject node, so a
-     * relation with no subject has no node to attach to.
+     * relation whose subject formal is null has no node to attach to. One that
+     * carries nothing else states nothing and is skipped; one carrying an
+     * identifier, attributes, or another formal is rejected.
      *
      * @param array<string, array<string, mixed>> $nodes
      *
      * @throws \Prov\Exception\ProvException
-     *   When the relation has no qualified form and carries an identifier or
-     *   attributes, which that form is the only place to put.
+     *   When the relation has no subject to attach to and still carries
+     *   content, or has no qualified form and is missing the object formal or
+     *   carrying an identifier or attributes that form is the only place for.
      */
     private function attachRelation(ProvRelation $relation, array &$nodes, NamespaceManager $nsManager): void
     {
@@ -250,15 +252,28 @@ class JsonLdSerializer implements ProvSerializerInterface
         // @mago-expect analysis:mixed-assignment
         $subject = $subjectProp !== null ? $formals[$subjectProp] : null;
         if (!$subject instanceof QualifiedName) {
+            $this->assertSubjectLessRelationIsEmpty($relation, $formals, $subjectProp);
             return;
         }
         $subjectId = $this->jsonLdId($subject, $nsManager);
         $this->ensureNode($nodes, $subjectId);
 
         $properties = $spec['properties'];
+        $objectProp = array_key_first($properties);
+        // @mago-expect analysis:mixed-assignment
+        $object = $objectProp !== null ? $formals[$objectProp] ?? null : null;
 
         if ($spec['qualifiedProperty'] === null) {
             $this->assertNoUnrepresentableMetadata($relation, $spec['shortcutProperty']);
+            if ($objectProp !== null && !$this->isPopulatedFormal($object)) {
+                throw new ProvException(
+                    'PROV-JSONLD writes a '
+                    . $relation::class
+                    . " as the plain object property {$spec['shortcutProperty']}, which has no qualified form, "
+                    . "so a record with no {$objectProp} has nothing left to write. "
+                    . "Serialize to PROV-JSON, PROV-N, or PROV-XML instead, or set the {$objectProp}.",
+                );
+            }
             foreach ($properties as $prop => $jsonLdProperty) {
                 $property = $jsonLdProperty === '' ? $spec['shortcutProperty'] : $jsonLdProperty;
                 // @mago-expect analysis:mixed-assignment
@@ -275,21 +290,26 @@ class JsonLdSerializer implements ProvSerializerInterface
             return;
         }
 
-        $objectProp = array_key_first($properties);
-        // @mago-expect analysis:mixed-assignment
-        $object = $objectProp !== null ? $formals[$objectProp] ?? null : null;
-
         $hasExtraFormals = false;
         foreach (array_keys($properties) as $prop) {
             // @mago-expect analysis:mixed-assignment
             $value = $formals[$prop] ?? null;
-            if ($prop !== $objectProp && $value !== null && $value !== []) {
+            if ($prop !== $objectProp && $this->isPopulatedFormal($value)) {
                 $hasExtraFormals = true;
                 break;
             }
         }
 
-        if ($relation->identifier !== null || !$relation->attributes->isEmpty() || $hasExtraFormals) {
+        // A relation with no object formal still gets the qualified node: PROV-O
+        // allows a qualified node without its object, and the shortcut property
+        // needs an object to point at, so this is the shape that keeps the
+        // relation and everything it carries.
+        if (
+            $relation->identifier !== null
+            || !$relation->attributes->isEmpty()
+            || $hasExtraFormals
+            || !$object instanceof QualifiedName
+        ) {
             $qNode = $this->makeQualifiedNode((string) $spec['type'], $relation, $nsManager);
             foreach ($properties as $prop => $jsonLdProperty) {
                 // @mago-expect analysis:mixed-assignment
@@ -303,9 +323,69 @@ class JsonLdSerializer implements ProvSerializerInterface
                 }
             }
             $this->appendProperty($nodes[$subjectId], $spec['qualifiedProperty'], $qNode);
-        } elseif ($object instanceof QualifiedName) {
+        } else {
             $this->appendProperty($nodes[$subjectId], $spec['shortcutProperty'], $this->idRef($object, $nsManager));
         }
+    }
+
+    /**
+     * Rejects a relation with no subject that still carries content.
+     *
+     * JSON-LD writes a relation as a property of its subject node, so a
+     * relation with no subject has no node to write it on. One that carries
+     * nothing else states nothing and is dropped; one carrying an identifier,
+     * attributes, or another formal would lose that content, so serialization
+     * fails instead.
+     *
+     * @param array<string, mixed> $formals
+     *
+     * @throws \Prov\Exception\ProvException
+     */
+    private function assertSubjectLessRelationIsEmpty(
+        ProvRelation $relation,
+        array $formals,
+        ?string $subjectProp,
+    ): void {
+        $lost = [];
+        if ($relation->identifier !== null) {
+            $lost[] = "identifier '{$relation->identifier}'";
+        }
+        if (!$relation->attributes->isEmpty()) {
+            $lost[] = 'attributes';
+        }
+        $populated = [];
+        // @mago-expect analysis:mixed-assignment
+        foreach ($formals as $prop => $value) {
+            if ($prop !== $subjectProp && $this->isPopulatedFormal($value)) {
+                $populated[] = $prop;
+            }
+        }
+        if ($populated !== []) {
+            $lost[] = implode(' and ', $populated);
+        }
+        if ($lost === []) {
+            return;
+        }
+
+        $named = $subjectProp !== null ? " ({$subjectProp})" : '';
+        throw new ProvException(
+            'PROV-JSONLD writes a relation as a property of its subject node, and this '
+            . $relation::class
+            . " has no subject{$named}, so its "
+            . implode(', ', $lost)
+            . ' would be dropped. Serialize to PROV-JSON, PROV-N, or PROV-XML instead, or set the subject'
+            . $named
+            . '.',
+        );
+    }
+
+    /**
+     * Whether a formal holds a value: a set reference or time, or a non-empty
+     * dictionary key set. Null and an empty set count as absent.
+     */
+    private function isPopulatedFormal(mixed $value): bool
+    {
+        return $value !== null && $value !== [];
     }
 
     /**
