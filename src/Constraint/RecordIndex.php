@@ -85,6 +85,13 @@ class RecordIndex
     private array $records;
 
     /**
+     * Cached getActivityTimeBounds() result.
+     *
+     * @var ?array<string, array{start: ?\DateTimeImmutable, end: ?\DateTimeImmutable}>
+     */
+    private ?array $activityTimeBounds = null;
+
+    /**
      * @param list<\Prov\Model\ProvRecord> $records
      */
     public function __construct(array $records)
@@ -264,6 +271,65 @@ class RecordIndex
     public function getEndsForActivity(string $uri): array
     {
         return $this->endsByActivity[$uri] ?? [];
+    }
+
+    /**
+     * The time bounds known for each activity URI: the latest start it is said
+     * to have and the earliest end, gathered from the activity records' inline
+     * times and from every timed start and end event that names it. An
+     * activity that is only referenced by its events, never declared, is
+     * covered too (scruffy PROV).
+     *
+     * Every start of an activity precedes every end, usage, and generation
+     * (constraints 30, 33, and 34), so the latest start and the earliest end
+     * are the binding pair for all three checks. A null bound means no timed
+     * source for that side exists.
+     *
+     * @return array<string, array{start: ?\DateTimeImmutable, end: ?\DateTimeImmutable}>
+     */
+    public function getActivityTimeBounds(): array
+    {
+        if ($this->activityTimeBounds !== null) {
+            return $this->activityTimeBounds;
+        }
+
+        /** @var array<string, array{starts: list<\DateTimeImmutable>, ends: list<\DateTimeImmutable>}> $times */
+        $times = [];
+        foreach ($this->activityRecords as $activity) {
+            $uri = $activity->identifier?->getUri();
+            if ($uri === null) {
+                continue;
+            }
+            $times[$uri] ??= ['starts' => [], 'ends' => []];
+            if ($activity->startTime !== null) {
+                $times[$uri]['starts'][] = $activity->startTime;
+            }
+            if ($activity->endTime !== null) {
+                $times[$uri]['ends'][] = $activity->endTime;
+            }
+        }
+        foreach ($this->getActivityUrisWithEvents() as $uri) {
+            $times[$uri] ??= ['starts' => [], 'ends' => []];
+            foreach ($this->startsByActivity[$uri] ?? [] as $start) {
+                if ($start->time !== null) {
+                    $times[$uri]['starts'][] = $start->time;
+                }
+            }
+            foreach ($this->endsByActivity[$uri] ?? [] as $end) {
+                if ($end->time !== null) {
+                    $times[$uri]['ends'][] = $end->time;
+                }
+            }
+        }
+
+        $bounds = [];
+        foreach ($times as $uri => ['starts' => $starts, 'ends' => $ends]) {
+            $bounds[$uri] = [
+                'start' => $starts === [] ? null : max($starts),
+                'end' => $ends === [] ? null : min($ends),
+            ];
+        }
+        return $this->activityTimeBounds = $bounds;
     }
 
     /** @return list<\Prov\Relation\Specialization> */

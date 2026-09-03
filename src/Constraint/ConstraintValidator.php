@@ -542,60 +542,29 @@ class ConstraintValidator
     /** Constraint 30: Start must precede end for the same activity. */
     private function checkConstraint30(RecordIndex $index, ConstraintViolationList $violations): void
     {
-        // Own times are aggregated per URI first, so a restated activity is
-        // checked (and reported) once, with every declaration's times folded
-        // in. An anonymous activity is its own statement: only its own
-        // startTime and endTime can order it, checked inline.
-        /** @var array<string, array{starts: list<\DateTimeImmutable>, ends: list<\DateTimeImmutable>}> $ownTimes */
-        $ownTimes = [];
+        // An anonymous activity is its own statement: only its own startTime
+        // and endTime can order it.
         foreach ($index->getActivities() as $record) {
-            $uri = $record->identifier?->getUri();
-            if ($uri === null) {
-                if ($record->startTime !== null && $record->endTime !== null && $record->startTime > $record->endTime) {
-                    $violations->add(new ConstraintViolation(
-                        ConstraintId::StartPrecedesEnd,
-                        "Activity '' start time is after its end time.",
-                        null,
-                    ));
-                }
-                continue;
-            }
-            $ownTimes[$uri] ??= ['starts' => [], 'ends' => []];
-            if ($record->startTime !== null) {
-                $ownTimes[$uri]['starts'][] = $record->startTime;
-            }
-            if ($record->endTime !== null) {
-                $ownTimes[$uri]['ends'][] = $record->endTime;
+            if (
+                $record->identifier === null
+                && $record->startTime !== null
+                && $record->endTime !== null
+                && $record->startTime > $record->endTime
+            ) {
+                $violations->add(new ConstraintViolation(
+                    ConstraintId::StartPrecedesEnd,
+                    "Activity '' start time is after its end time.",
+                    null,
+                ));
             }
         }
 
-        // A referenced-but-undeclared activity is still ordered by its start
-        // and end events (scruffy PROV), mirroring the 36/37/38 scope.
-        foreach ($index->getActivityUrisWithEvents() as $uri) {
-            $ownTimes[$uri] ??= ['starts' => [], 'ends' => []];
-        }
-
-        foreach ($ownTimes as $uri => $times) {
-            $startTimes = $times['starts'];
-            $endTimes = $times['ends'];
-            foreach ($index->getStartsForActivity($uri) as $start) {
-                if ($start->time !== null) {
-                    $startTimes[] = $start->time;
-                }
-            }
-            foreach ($index->getEndsForActivity($uri) as $end) {
-                if ($end->time !== null) {
-                    $endTimes[] = $end->time;
-                }
-            }
-
-            if ($startTimes === [] || $endTimes === []) {
-                continue;
-            }
-
-            // Every start must precede every end, so the latest start may not
-            // follow the earliest end, independent of record order.
-            if (max($startTimes) > min($endTimes)) {
+        // A named activity is checked (and reported) once per URI, with every
+        // declaration's times and every start/end event folded in. Every start
+        // must precede every end, so the latest start may not follow the
+        // earliest end, independent of record order.
+        foreach ($index->getActivityTimeBounds() as $uri => ['start' => $start, 'end' => $end]) {
+            if ($start !== null && $end !== null && $start > $end) {
                 $violations->add(
                     new ConstraintViolation(
                         ConstraintId::StartPrecedesEnd,
@@ -607,31 +576,39 @@ class ConstraintValidator
         }
     }
 
-    /** Constraint 33: Usage must occur within activity timespan. */
+    /**
+     * Constraint 33: Usage must occur within activity timespan.
+     *
+     * The bounds come from Start/End events as well as inline activity times:
+     * an activity statement may leave its times out while identified
+     * wasStartedBy / wasEndedBy records carry them.
+     */
     private function checkConstraint33(RecordIndex $index, ConstraintViolationList $violations): void
     {
+        $bounds = $index->getActivityTimeBounds();
         foreach ($index->getUsages() as $record) {
             if ($record->activity === null || $record->time === null) {
                 continue;
             }
-            $activity = $index->getActivity($record->activity->getUri());
-            if ($activity === null) {
+            $uri = $record->activity->getUri();
+            $bound = $bounds[$uri] ?? null;
+            if ($bound === null) {
                 continue;
             }
-            if ($activity->startTime !== null && $record->time < $activity->startTime) {
+            if ($bound['start'] !== null && $record->time < $bound['start']) {
                 $violations->add(
                     new ConstraintViolation(
                         ConstraintId::UsageWithinActivity,
-                        "Usage time precedes activity '{$record->activity->getUri()}' start time.",
+                        "Usage time precedes activity '{$uri}' start time.",
                         $record->identifier?->getUri(),
                     ),
                 );
             }
-            if ($activity->endTime !== null && $record->time > $activity->endTime) {
+            if ($bound['end'] !== null && $record->time > $bound['end']) {
                 $violations->add(
                     new ConstraintViolation(
                         ConstraintId::UsageWithinActivity,
-                        "Usage time exceeds activity '{$record->activity->getUri()}' end time.",
+                        "Usage time exceeds activity '{$uri}' end time.",
                         $record->identifier?->getUri(),
                     ),
                 );
@@ -639,31 +616,37 @@ class ConstraintValidator
         }
     }
 
-    /** Constraint 34: Generation must occur within activity timespan. */
+    /**
+     * Constraint 34: Generation must occur within activity timespan.
+     *
+     * Bounded the same way as constraint 33.
+     */
     private function checkConstraint34(RecordIndex $index, ConstraintViolationList $violations): void
     {
+        $bounds = $index->getActivityTimeBounds();
         foreach ($index->getGenerations() as $record) {
             if ($record->activity === null || $record->time === null) {
                 continue;
             }
-            $activity = $index->getActivity($record->activity->getUri());
-            if ($activity === null) {
+            $uri = $record->activity->getUri();
+            $bound = $bounds[$uri] ?? null;
+            if ($bound === null) {
                 continue;
             }
-            if ($activity->startTime !== null && $record->time < $activity->startTime) {
+            if ($bound['start'] !== null && $record->time < $bound['start']) {
                 $violations->add(
                     new ConstraintViolation(
                         ConstraintId::GenerationWithinActivity,
-                        "Generation time precedes activity '{$record->activity->getUri()}' start time.",
+                        "Generation time precedes activity '{$uri}' start time.",
                         $record->identifier?->getUri(),
                     ),
                 );
             }
-            if ($activity->endTime !== null && $record->time > $activity->endTime) {
+            if ($bound['end'] !== null && $record->time > $bound['end']) {
                 $violations->add(
                     new ConstraintViolation(
                         ConstraintId::GenerationWithinActivity,
-                        "Generation time exceeds activity '{$record->activity->getUri()}' end time.",
+                        "Generation time exceeds activity '{$uri}' end time.",
                         $record->identifier?->getUri(),
                     ),
                 );
