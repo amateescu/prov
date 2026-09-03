@@ -10,17 +10,31 @@ use Prov\Attribute\Attributes;
 use Prov\Attribute\Literal;
 use Prov\Document;
 use Prov\Entity;
+use Prov\Exception\ProvException;
 use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\ProvElement;
 use Prov\Model\ProvRelation;
 use Prov\Model\RelationMetadata;
-use Prov\Relation\Mention;
+use Prov\Relation\Dictionary\DictionaryEntry;
 
 /**
  * Writes a Document as PROV-JSONLD (the JSON-LD encoding of PROV-O). This
  * format is serialize-only per the W3C specification; there is no matching
  * deserializer.
+ *
+ * JSON-LD has one `@context` for the whole document, so this serializer works
+ * in one namespace scope: the document's declarations plus every bundle
+ * declaration whose prefix is free there. A bundle prefix that rebinds a
+ * document prefix cannot be promoted, and names under it get a minted prefix
+ * instead, so every compact IRI in the output expands to the URI the model
+ * carries.
+ *
+ * PROV-O models specializationOf, alternateOf, hadMember and mentionOf as plain
+ * object properties with no qualified form, and PROV-Dictionary does the same
+ * for hadDictionaryMember. Those relations have nowhere to put an identifier or
+ * attributes, so a record carrying either is rejected rather than written
+ * without them.
  */
 class JsonLdSerializer implements ProvSerializerInterface
 {
@@ -38,6 +52,10 @@ class JsonLdSerializer implements ProvSerializerInterface
 
     /**
      * {@inheritdoc}
+     *
+     * @throws \Prov\Exception\ProvException
+     *   When a relation carries an identifier or attributes that PROV-JSONLD
+     *   has nowhere to put.
      */
     #[\NoDiscard]
     public function serialize(Document $document): string
@@ -48,26 +66,24 @@ class JsonLdSerializer implements ProvSerializerInterface
         $minter = new PrefixMinter($nsManager);
         $this->minter = $minter;
 
-        $context = $this->buildContext($document);
+        $this->promoteBundleNamespaces($document, $nsManager);
+
         $documentRecords = $this->sortRecords ? OutputOrder::records($document->records) : $document->records;
         $graph = $this->buildGraph($documentRecords, $nsManager);
 
         foreach ($document->bundles as $bundle) {
-            $bundleNsManager = NamespaceManager::forContainer($bundle->namespaces, $nsManager);
-
             $bundleRecords = $this->sortRecords ? OutputOrder::records($bundle->records) : $bundle->records;
             $bundleNode = [
-                '@id' => $this->jsonLdId($bundle->identifier),
+                '@id' => $this->jsonLdId($bundle->identifier, $nsManager),
                 '@type' => 'prov:Bundle',
-                '@graph' => $this->buildGraph($bundleRecords, $bundleNsManager),
+                '@graph' => $this->buildGraph($bundleRecords, $nsManager),
             ];
             $graph[] = $bundleNode;
         }
 
-        foreach ($minter->getMintedNamespaces() as $ns) {
-            $context[$ns->prefix] = $ns->uri;
-        }
-        $context = OutputOrder::prefixMap($context);
+        // Built last: the manager has collected every promoted and minted
+        // binding the body wrote by then.
+        $context = OutputOrder::prefixMap($this->buildContext($nsManager));
 
         $output = ['@context' => $context];
         if (count($graph) === 1 && !isset($graph[0]['@graph'])) {
@@ -88,29 +104,54 @@ class JsonLdSerializer implements ProvSerializerInterface
     }
 
     /**
-     * Builds the JSON-LD `@context` block from the document's namespace
-     * declarations. The library's "default" prefix maps to `@vocab`. The prov
-     * and xsd namespaces are always included: the serializer emits prov:* and
-     * xsd:* terms structurally, and unlike the library's deserializers, an
-     * external JSON-LD consumer has no built-in bindings for them.
+     * Promotes each bundle's namespace declarations into the document-wide
+     * context manager when their prefix is still free there. A bundle prefix
+     * that rebinds a document prefix is left out: promoting it would change what
+     * the document-level prefix means. Names under such a prefix go through the
+     * minter, which gives them one that is free.
+     *
+     * A bundle's default namespace is never promoted either: `@vocab` is
+     * document-wide, and identifiers in a default namespace are written as full
+     * URIs anyway.
+     */
+    private function promoteBundleNamespaces(Document $document, NamespaceManager $context): void
+    {
+        foreach ($document->bundles as $bundle) {
+            foreach ($bundle->namespaces as $ns) {
+                if ($ns->prefix === 'default') {
+                    continue;
+                }
+                if ($context->getNamespace($ns->prefix) === null) {
+                    $context->addOrReplace($ns);
+                }
+            }
+        }
+    }
+
+    /**
+     * Builds the JSON-LD `@context` block from the namespace declarations the
+     * document wrote against. The library's "default" prefix maps to `@vocab`.
+     * The prov and xsd namespaces are always included: the serializer emits
+     * prov:* and xsd:* terms structurally, and unlike the library's
+     * deserializers, an external JSON-LD consumer has no built-in bindings for
+     * them.
      *
      * @return array<string, string>
      */
-    private function buildContext(Document $document): array
+    private function buildContext(NamespaceManager $context): array
     {
-        $context = [
+        $bindings = [
             'prov' => 'http://www.w3.org/ns/prov#',
             'xsd' => 'http://www.w3.org/2001/XMLSchema#',
         ];
-        foreach ($document->namespaces as $ns) {
+        foreach ($context->getRegisteredNamespaces() as $ns) {
             if ($ns->prefix === 'default') {
-                $context['@vocab'] = $ns->uri;
+                $bindings['@vocab'] = $ns->uri;
             } else {
-                $context[$ns->prefix] = $ns->uri;
+                $bindings[$ns->prefix] = $ns->uri;
             }
         }
-
-        return $context;
+        return $bindings;
     }
 
     /**
@@ -121,6 +162,9 @@ class JsonLdSerializer implements ProvSerializerInterface
      * @param list<\Prov\Model\ProvRecord> $records
      *
      * @return list<array<string, mixed>>
+     *
+     * @throws \Prov\Exception\ProvException
+     *   When a relation carries a value PROV-JSONLD cannot represent.
      */
     private function buildGraph(array $records, NamespaceManager $nsManager): array
     {
@@ -136,7 +180,7 @@ class JsonLdSerializer implements ProvSerializerInterface
         foreach ($records as $record) {
             if ($record instanceof ProvElement) {
                 $id = $record->identifier !== null
-                    ? $this->jsonLdId($record->identifier)
+                    ? $this->jsonLdId($record->identifier, $nsManager)
                     : $this->blankLabelMinter->labelFor($record);
                 if (!isset($nodes[$id])) {
                     $nodes[$id] = ['@id' => $id];
@@ -181,25 +225,24 @@ class JsonLdSerializer implements ProvSerializerInterface
      * node typed per PROV-O) when the relation carries an identifier, extra
      * attributes, or secondary formals, and as a plain object property
      * otherwise. The encoding is table-driven by RelationMetadata::JSONLD.
-     * Mention keeps a hand-written shape (its object nests prov:asInBundle),
-     * and the Dictionary extension relations have no PROV-O shortcut form.
      *
      * A relation whose subject formal is null is omitted from the output:
      * JSON-LD attaches a relation as a property of its subject node, so a
      * relation with no subject has no node to attach to.
      *
      * @param array<string, array<string, mixed>> $nodes
+     *
+     * @throws \Prov\Exception\ProvException
+     *   When the relation has no qualified form and carries an identifier or
+     *   attributes, which that form is the only place to put.
      */
     private function attachRelation(ProvRelation $relation, array &$nodes, NamespaceManager $nsManager): void
     {
-        if ($relation instanceof Mention) {
-            $this->attachMention($relation, $nodes);
-            return;
-        }
-
         $spec = RelationMetadata::JSONLD[$relation::class] ?? null;
         if ($spec === null) {
-            return;
+            throw new ProvException(
+                'PROV-JSONLD has no encoding for ' . $relation::class . '; it would be dropped from the output.',
+            );
         }
 
         $formals = RelationMetadata::extractFormals($relation);
@@ -209,25 +252,38 @@ class JsonLdSerializer implements ProvSerializerInterface
         if (!$subject instanceof QualifiedName) {
             return;
         }
-        $subjectId = $this->jsonLdId($subject);
+        $subjectId = $this->jsonLdId($subject, $nsManager);
         $this->ensureNode($nodes, $subjectId);
 
         $properties = $spec['properties'];
-        $objectProp = array_key_first($properties);
-        // @mago-expect analysis:mixed-assignment
-        $object = $objectProp !== null ? $formals[$objectProp] ?? null : null;
 
         if ($spec['qualifiedProperty'] === null) {
-            // Plain object property (specializationOf, alternateOf, hadMember).
-            if ($object instanceof QualifiedName) {
-                $this->appendProperty($nodes[$subjectId], $spec['shortcutProperty'], $this->idRef($object));
+            $this->assertNoUnrepresentableMetadata($relation, $spec['shortcutProperty']);
+            foreach ($properties as $prop => $jsonLdProperty) {
+                $property = $jsonLdProperty === '' ? $spec['shortcutProperty'] : $jsonLdProperty;
+                // @mago-expect analysis:mixed-assignment
+                $value = $formals[$prop] ?? null;
+                if ($value instanceof QualifiedName) {
+                    $this->appendProperty($nodes[$subjectId], $property, $this->idRef($value, $nsManager));
+                } elseif (is_array($value)) {
+                    // @mago-expect analysis:mixed-assignment
+                    foreach ($this->dictionaryValues($value, $nsManager) as $item) {
+                        $this->appendProperty($nodes[$subjectId], $property, $item);
+                    }
+                }
             }
             return;
         }
 
+        $objectProp = array_key_first($properties);
+        // @mago-expect analysis:mixed-assignment
+        $object = $objectProp !== null ? $formals[$objectProp] ?? null : null;
+
         $hasExtraFormals = false;
         foreach (array_keys($properties) as $prop) {
-            if ($prop !== $objectProp && ($formals[$prop] ?? null) !== null) {
+            // @mago-expect analysis:mixed-assignment
+            $value = $formals[$prop] ?? null;
+            if ($prop !== $objectProp && $value !== null && $value !== []) {
                 $hasExtraFormals = true;
                 break;
             }
@@ -239,31 +295,80 @@ class JsonLdSerializer implements ProvSerializerInterface
                 // @mago-expect analysis:mixed-assignment
                 $value = $formals[$prop] ?? null;
                 if ($value instanceof QualifiedName) {
-                    $qNode[$jsonLdProperty] = $this->idRef($value);
+                    $qNode[$jsonLdProperty] = $this->idRef($value, $nsManager);
                 } elseif ($value instanceof \DateTimeImmutable) {
                     $qNode[$jsonLdProperty] = $this->formatDateTime($value);
+                } elseif (is_array($value) && $value !== []) {
+                    $qNode[$jsonLdProperty] = $this->dictionaryValues($value, $nsManager);
                 }
             }
             $this->appendProperty($nodes[$subjectId], $spec['qualifiedProperty'], $qNode);
         } elseif ($object instanceof QualifiedName) {
-            $this->appendProperty($nodes[$subjectId], $spec['shortcutProperty'], $this->idRef($object));
+            $this->appendProperty($nodes[$subjectId], $spec['shortcutProperty'], $this->idRef($object, $nsManager));
         }
     }
 
-    /** @param array<string, array<string, mixed>> $nodes */
-    private function attachMention(Mention $men, array &$nodes): void
+    /**
+     * Rejects a relation whose identifier or attributes have nowhere to go.
+     * PROV-O models specializationOf, alternateOf, hadMember and mentionOf as
+     * plain object properties, and PROV-Dictionary does the same for
+     * hadDictionaryMember: the statement is one triple on the subject node, with
+     * no node of its own to carry an identifier or extra attributes. Writing the
+     * triple anyway would silently drop model data, so the whole serialization
+     * fails instead.
+     *
+     * @throws \Prov\Exception\ProvException
+     */
+    private function assertNoUnrepresentableMetadata(ProvRelation $relation, string $property): void
     {
-        $subjectId = $this->jsonLdId($men->specificEntity);
-        $general = $men->generalEntity;
-        $this->ensureNode($nodes, $subjectId);
-        $value = $this->idRef($general);
-        if ($men->bundle !== null) {
-            $value = [
-                'prov:asInBundle' => $this->idRef($men->bundle),
-                'prov:mentionOf' => $this->idRef($general),
-            ];
+        $lost = [];
+        if ($relation->identifier !== null) {
+            $lost[] = "identifier '{$relation->identifier}'";
         }
-        $this->appendProperty($nodes[$subjectId], 'prov:mentionOf', $value);
+        if (!$relation->attributes->isEmpty()) {
+            $lost[] = 'attributes';
+        }
+        if ($lost === []) {
+            return;
+        }
+
+        throw new ProvException(
+            'PROV-JSONLD cannot represent the '
+            . implode(' and ', $lost)
+            . ' of a '
+            . $relation::class
+            . ": it is written as the plain object property {$property}, which has no qualified form to carry them. "
+            . 'Serialize to PROV-JSON, PROV-N, or PROV-XML instead, or drop the value.',
+        );
+    }
+
+    /**
+     * Encodes an array-typed formal: a dictionary's key/entity pairs as
+     * prov:KeyEntityPair nodes, and a removal's removed keys as plain values.
+     *
+     * @param array<array-key, mixed> $items
+     *
+     * @return list<mixed>
+     */
+    private function dictionaryValues(array $items, NamespaceManager $nsManager): array
+    {
+        $out = [];
+        // @mago-expect analysis:mixed-assignment
+        foreach ($items as $item) {
+            if ($item instanceof DictionaryEntry) {
+                $pair = ['@type' => 'prov:KeyEntityPair'];
+                if ($item->key !== null) {
+                    $pair['prov:pairKey'] = $this->serializeValue($item->key, $nsManager);
+                }
+                if ($item->entity !== null) {
+                    $pair['prov:pairEntity'] = $this->idRef($item->entity, $nsManager);
+                }
+                $out[] = $pair;
+            } elseif ($item instanceof QualifiedName || $item instanceof Literal || is_scalar($item)) {
+                $out[] = $this->serializeValue($item, $nsManager);
+            }
+        }
+        return $out;
     }
 
     // Helpers
@@ -275,7 +380,7 @@ class JsonLdSerializer implements ProvSerializerInterface
     {
         $node = ['@type' => $type];
         if ($relation->identifier !== null) {
-            $node['@id'] = $this->jsonLdId($relation->identifier);
+            $node['@id'] = $this->jsonLdId($relation->identifier, $nsManager);
         }
         $this->addAttributes($node, $relation->attributes, $nsManager);
         return $node;
@@ -294,7 +399,7 @@ class JsonLdSerializer implements ProvSerializerInterface
             $key = $this->minter->uriToPrefixed($uri, $nsManager);
             $key = NamespaceManager::stripDefaultSentinel($key);
             foreach ($values as $value) {
-                $this->appendProperty($node, $key, $this->serializeValue($value));
+                $this->appendProperty($node, $key, $this->serializeValue($value, $nsManager));
             }
         }
     }
@@ -330,19 +435,25 @@ class JsonLdSerializer implements ProvSerializerInterface
      * The IRI to write for an identifier. JSON-LD resolves a relative `@id`
      * against the document base (not `@vocab`), so a default-namespace
      * identifier is emitted as its full URI; the reserved `default:` prefix is
-     * never written. Prefixed names expand against their `@context` entry.
+     * never written. A blank node keeps its `_:` label, which JSON-LD reads as a
+     * blank node identifier. Every other name goes through the minter, so the
+     * prefix it is written with is one the emitted `@context` binds to the
+     * name's own namespace URI.
      */
-    private function jsonLdId(QualifiedName $qn): string
+    private function jsonLdId(QualifiedName $qn, NamespaceManager $context): string
     {
-        return $qn->namespace->prefix === 'default' ? $qn->getUri() : (string) $qn;
+        if ($qn->namespace->prefix === 'default') {
+            return $qn->getUri();
+        }
+        return $this->minter->token($qn, $context);
     }
 
     /**
      * @return array{'@id': string}
      */
-    private function idRef(QualifiedName $qn): array
+    private function idRef(QualifiedName $qn, NamespaceManager $context): array
     {
-        return ['@id' => $this->jsonLdId($qn)];
+        return ['@id' => $this->jsonLdId($qn, $context)];
     }
 
     /**
@@ -356,16 +467,18 @@ class JsonLdSerializer implements ProvSerializerInterface
         ];
     }
 
-    private function serializeValue(QualifiedName|Literal|string|int|float|bool $value): mixed
-    {
+    private function serializeValue(
+        QualifiedName|Literal|string|int|float|bool $value,
+        NamespaceManager $context,
+    ): mixed {
         if ($value instanceof QualifiedName) {
-            return ['@id' => $this->jsonLdId($value)];
+            return ['@id' => $this->jsonLdId($value, $context)];
         }
 
         if ($value instanceof Literal) {
             $result = ['@value' => $value->value];
             if ($value->datatype !== null) {
-                $result['@type'] = $this->jsonLdId($value->datatype);
+                $result['@type'] = $this->jsonLdId($value->datatype, $context);
             }
             if ($value->languageTag !== null) {
                 $result['@language'] = $value->languageTag;

@@ -139,10 +139,14 @@ final class RelationMetadata
      *    node (null when type is null).
      *  - shortcutProperty: the binary object-property form.
      *  - properties: JSON-LD property per non-subject formal, in emission
-     *    order; the first entry is the shortcut form's object.
+     *    order; the first entry is the shortcut form's object and carries the
+     *    empty string, since its property name is shortcutProperty.
      *
-     * The subject is always the relation's first formal property. Dictionary
-     * extension relations have no PROV-O shortcut encoding and are absent.
+     * The subject is always the relation's first formal property. Relations
+     * with no qualified form can still name their remaining formals: Mention
+     * puts prov:asInBundle on the subject alongside prov:mentionOf, as
+     * PROV-Links defines it. The PROV-Dictionary relations come from that
+     * extension's ontology rather than PROV-O.
      *
      * @var array<class-string<\Prov\Model\ProvRelation>, array{
      *   type: ?string,
@@ -240,6 +244,30 @@ final class RelationMetadata
             'qualifiedProperty' => null,
             'shortcutProperty' => 'prov:hadMember',
             'properties' => ['entity' => ''],
+        ],
+        Mention::class => [
+            'type' => null,
+            'qualifiedProperty' => null,
+            'shortcutProperty' => 'prov:mentionOf',
+            'properties' => ['generalEntity' => '', 'bundle' => 'prov:asInBundle'],
+        ],
+        DictionaryMembership::class => [
+            'type' => null,
+            'qualifiedProperty' => null,
+            'shortcutProperty' => 'prov:hadDictionaryMember',
+            'properties' => ['keyEntityPairs' => ''],
+        ],
+        DictionaryInsertion::class => [
+            'type' => 'prov:Insertion',
+            'qualifiedProperty' => 'prov:qualifiedInsertion',
+            'shortcutProperty' => 'prov:derivedByInsertionFrom',
+            'properties' => ['before' => 'prov:dictionary', 'keyEntityPairs' => 'prov:insertedKeyEntityPair'],
+        ],
+        DictionaryRemoval::class => [
+            'type' => 'prov:Removal',
+            'qualifiedProperty' => 'prov:qualifiedRemoval',
+            'shortcutProperty' => 'prov:derivedByRemovalFrom',
+            'properties' => ['before' => 'prov:dictionary', 'removedKeys' => 'prov:removedKey'],
         ],
     ];
 

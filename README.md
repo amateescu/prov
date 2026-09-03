@@ -86,6 +86,12 @@ PROV-N has no slot for an explicit identifier on `specializationOf`, `alternateO
 
 The `prov` and `xsd` prefixes are implicit in PROV-N and the grammar forbids redeclaring them, so the serializer never writes those declarations and refuses a document that binds either prefix to another namespace. Rename the prefix first. Every other prefix is checked against the `PN_PREFIX` production before it is written, Unicode included, so a prefix that starts with a digit or ends in a dot is refused rather than emitted as unparseable text.
 
+### PROV-JSONLD notes
+
+PROV-O models `specializationOf`, `alternateOf`, `hadMember`, and `mentionOf` as plain object properties, and PROV-Dictionary does the same for `hadDictionaryMember`. A statement in one of those forms is a single triple on the subject node, with no node of its own, so there is nowhere to write a relation identifier or extra attributes. Serializing a document whose record carries either throws `Prov\Exception\ProvException` rather than writing the triple without them. Every other relation has a qualified form (`prov:qualifiedGeneration`, `prov:qualifiedInsertion`, ...) that carries both.
+
+The whole document shares one `@context`. Bundle declarations are promoted into it when their prefix is free there; a bundle prefix that rebinds a document prefix cannot be, and names under it are written with a minted prefix instead, so every compact IRI expands to the URI the model carries.
+
 ## Document operations
 
 ```php

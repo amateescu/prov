@@ -7,10 +7,6 @@ namespace Prov\Tests\Serializer;
 use PHPUnit\Framework\TestCase;
 use Prov\Model\ProvRelation;
 use Prov\Model\RelationMetadata;
-use Prov\Relation\Dictionary\DictionaryInsertion;
-use Prov\Relation\Dictionary\DictionaryMembership;
-use Prov\Relation\Dictionary\DictionaryRemoval;
-use Prov\Relation\Mention;
 use Prov\Serializer\ProvNSerializer;
 
 /**
@@ -54,15 +50,6 @@ final class RelationDispatchConsistencyTest extends TestCase
         // Guard against a broken discovery path making the assertions vacuous.
         $this->assertNotEmpty($relations);
 
-        // Relations PROV-O encodes specially: Mention has a hand-written
-        // JSON-LD shape and the Dictionary extension has no shortcut form.
-        $jsonLdExempt = [
-            DictionaryInsertion::class,
-            DictionaryMembership::class,
-            DictionaryRemoval::class,
-            Mention::class,
-        ];
-
         $xmlChildren = RelationMetadata::xmlChildElements();
 
         foreach ($relations as $relation) {
@@ -77,13 +64,11 @@ final class RelationDispatchConsistencyTest extends TestCase
                 "{$relation} missing from RelationMetadata::JSON_KEYS",
             );
 
-            if (!in_array($relation, $jsonLdExempt, true)) {
-                $this->assertArrayHasKey(
-                    $relation,
-                    RelationMetadata::JSONLD,
-                    "{$relation} missing from RelationMetadata::JSONLD",
-                );
-            }
+            $this->assertArrayHasKey(
+                $relation,
+                RelationMetadata::JSONLD,
+                "{$relation} missing from RelationMetadata::JSONLD",
+            );
 
             $jsonKey = RelationMetadata::JSON_KEYS[$relation];
             $this->assertArrayHasKey(
@@ -99,6 +84,7 @@ final class RelationDispatchConsistencyTest extends TestCase
         $relations = self::relationClasses();
         $this->assertSame($relations, $this->sortedKeys(RelationMetadata::FORMALS));
         $this->assertSame($relations, $this->sortedKeys(RelationMetadata::JSON_KEYS));
+        $this->assertSame($relations, $this->sortedKeys(RelationMetadata::JSONLD));
     }
 
     public function testJsonLdPropertiesReferenceRealFormals(): void

@@ -478,19 +478,17 @@ final class JsonLdSerializerTest extends TestCase
 
     public function testMentionWithBundleShape(): void
     {
+        // PROV-Links puts both properties on the specific entity itself; an
+        // object nested under prov:mentionOf would expand to a blank node
+        // standing between the two entities.
         $builder = $this->buildDoc();
         $builder->entity('ex:specific');
         $builder->mentionOf(specificEntity: 'ex:specific', generalEntity: 'ex:general', bundle: 'ex:b1');
         $data = $this->serializeToArray($builder);
 
         $node = $this->getNode($data, 'ex:specific');
-        $this->assertSame(
-            [
-                'prov:asInBundle' => ['@id' => 'ex:b1'],
-                'prov:mentionOf' => ['@id' => 'ex:general'],
-            ],
-            $node['prov:mentionOf'],
-        );
+        $this->assertSame(['@id' => 'ex:general'], $node['prov:mentionOf']);
+        $this->assertSame(['@id' => 'ex:b1'], $node['prov:asInBundle']);
     }
 
     public function testMentionWithoutBundleIsPlainReference(): void
