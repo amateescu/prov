@@ -56,6 +56,14 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
 
     private PrefixMinter $minter;
 
+    /**
+     * Whether a QName has to be resolved at the element it occurs on. False
+     * while no element below the root or a bundleContent declares a namespace:
+     * the namespace managers then hold every binding, and their cached
+     * resolve() gives the same answer without a DOM lookup per name.
+     */
+    private bool $resolveAtElement = true;
+
     // PROV-XML element names match PROV-JSON keys, and the child element
     // layout per relation comes from RelationMetadata::xmlChildElements().
 
@@ -159,11 +167,14 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         NamespaceManager $nsManager,
     ): void {
         $el = $dom->createElementNS(self::PROV_NS, 'prov:' . $tagName);
+        // Every element is attached before it gets namespaced attributes or
+        // children: libxml then binds those to the root's declarations instead
+        // of redeclaring the namespace on the element itself.
+        $parent->appendChild($el);
         if ($record->identifier !== null) {
             $el->setAttributeNS(self::PROV_NS, 'prov:id', $this->xmlIdentifier($record->identifier, $nsManager));
         }
         $this->serializeAttributes($dom, $el, $record->attributes, $nsManager);
-        $parent->appendChild($el);
     }
 
     private function serializeActivity(
@@ -173,6 +184,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         NamespaceManager $nsManager,
     ): void {
         $el = $dom->createElementNS(self::PROV_NS, 'prov:activity');
+        $parent->appendChild($el);
         if ($record->identifier !== null) {
             $el->setAttributeNS(self::PROV_NS, 'prov:id', $this->xmlIdentifier($record->identifier, $nsManager));
         }
@@ -191,7 +203,6 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             ));
         }
         $this->serializeAttributes($dom, $el, $record->attributes, $nsManager);
-        $parent->appendChild($el);
     }
 
     private function serializeRelation(
@@ -206,6 +217,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         }
 
         $el = $dom->createElementNS(self::PROV_NS, 'prov:' . $tagName);
+        $parent->appendChild($el);
         if ($record->identifier !== null) {
             $el->setAttributeNS(self::PROV_NS, 'prov:id', $this->xmlIdentifier($record->identifier, $nsManager));
         }
@@ -216,30 +228,29 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         if ($record instanceof DictionaryMembership || $record instanceof DictionaryInsertion) {
             foreach ($record->keyEntityPairs as $pair) {
                 $kep = $dom->createElementNS(self::PROV_NS, 'prov:keyEntityPair');
+                $el->appendChild($kep);
                 $keyEl = $dom->createElementNS(self::PROV_NS, 'prov:key');
-                $this->setTypedTextContent($keyEl, $pair->key, $nsManager);
                 $kep->appendChild($keyEl);
+                $this->setTypedTextContent($keyEl, $pair->key, $nsManager);
                 if ($pair->entity !== null) {
                     $entityEl = $dom->createElementNS(self::PROV_NS, 'prov:entity');
+                    $kep->appendChild($entityEl);
                     $entityEl->setAttributeNS(
                         self::PROV_NS,
                         'prov:ref',
                         $this->xmlIdentifier($pair->entity, $nsManager),
                     );
-                    $kep->appendChild($entityEl);
                 }
-                $el->appendChild($kep);
             }
         } elseif ($record instanceof DictionaryRemoval) {
             foreach ($record->removedKeys as $key) {
                 $keyEl = $dom->createElementNS(self::PROV_NS, 'prov:key');
-                $this->setTypedTextContent($keyEl, $key, $nsManager);
                 $el->appendChild($keyEl);
+                $this->setTypedTextContent($keyEl, $key, $nsManager);
             }
         }
 
         $this->serializeAttributes($dom, $el, $record->attributes, $nsManager);
-        $parent->appendChild($el);
     }
 
     /**
@@ -421,6 +432,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
                 "Attribute key '{$prefixedKey}' cannot be represented as a PROV-XML element name.",
             );
         }
+        $parent->appendChild($el);
 
         if ($value instanceof QualifiedName) {
             $this->setTypedTextContent($el, $value, $nsManager);
@@ -444,8 +456,6 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         } else {
             $el->textContent = (string) $value;
         }
-
-        $parent->appendChild($el);
     }
 
     private function serializeBundle(
@@ -532,6 +542,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         }
 
         $nsManager = new NamespaceManager();
+        $this->resolveAtElement = $this->hasElementLocalDeclarations($dom, $data);
 
         $records = [];
         $bundles = [];
@@ -611,8 +622,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
      */
     private function deserializeEntity(\DOMElement $el, NamespaceManager $nsManager, array &$records): void
     {
-        $idStr = $this->resolveProvId($el, $nsManager);
-        $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
+        $id = $this->resolveProvId($el, $nsManager);
         $attrs = $this->deserializeChildAttributes($el, $nsManager) ?? Attributes::empty();
         $records[] = new Entity($id, $attrs);
     }
@@ -622,8 +632,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
      */
     private function deserializeActivity(\DOMElement $el, NamespaceManager $nsManager, array &$records): void
     {
-        $idStr = $this->resolveProvId($el, $nsManager);
-        $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
+        $id = $this->resolveProvId($el, $nsManager);
         $startTime = null;
         $endTime = null;
 
@@ -647,8 +656,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
      */
     private function deserializeAgent(\DOMElement $el, NamespaceManager $nsManager, array &$records): void
     {
-        $idStr = $this->resolveProvId($el, $nsManager);
-        $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
+        $id = $this->resolveProvId($el, $nsManager);
         $attrs = $this->deserializeChildAttributes($el, $nsManager) ?? Attributes::empty();
         $records[] = new Agent($id, $attrs);
     }
@@ -676,8 +684,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         if ($injectedSubtype !== null) {
             $relName = 'wasDerivedFrom';
         }
-        $idStr = $this->resolveProvId($el, $nsManager);
-        $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
+        $id = $this->resolveProvId($el, $nsManager);
         $formalMap = RelationMetadata::xmlChildElements()[$relName] ?? [];
 
         /** @var array<string, \Prov\Identifier\QualifiedName|\DateTimeImmutable> $formals */
@@ -690,13 +697,9 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             }
             $childLocalName = $child->localName;
             if ($childLocalName !== null && isset($formalMap[$childLocalName])) {
-                $ref = $child->getAttributeNS(self::PROV_NS, 'ref');
-                if ($ref !== '') {
-                    $formals[$formalMap[$childLocalName]] = $nsManager->resolve($this->resolveQNameInContext(
-                        $ref,
-                        $child,
-                        $nsManager,
-                    ));
+                $ref = $this->resolveProvRef($child, $nsManager);
+                if ($ref !== null) {
+                    $formals[$formalMap[$childLocalName]] = $ref;
                 } elseif ($childLocalName === 'time') {
                     $formals[$formalMap[$childLocalName]] = $this->parseDateTime($child->textContent);
                 }
@@ -769,14 +772,13 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     private function deserializeDictionaryRelation(\DOMElement $el, NamespaceManager $nsManager, array &$records): void
     {
         $relName = $el->localName;
-        $idStr = $this->resolveProvId($el, $nsManager);
-        $id = $idStr !== null ? $nsManager->resolve($idStr) : null;
+        $id = $this->resolveProvId($el, $nsManager);
 
         $keyEntityPairs = [];
         $removedKeys = [];
-        $dictionary = null;
-        $newDict = null;
-        $oldDict = null;
+        $dictQn = null;
+        $newDictQn = null;
+        $oldDictQn = null;
 
         foreach ($el->childNodes as $child) {
             if (!$child instanceof \DOMElement || $child->namespaceURI !== self::PROV_NS) {
@@ -784,9 +786,9 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             }
 
             match ($child->localName) {
-                'dictionary' => $dictionary = $child->getAttributeNS(self::PROV_NS, 'ref') ?: null,
-                'newDictionary' => $newDict = $child->getAttributeNS(self::PROV_NS, 'ref') ?: null,
-                'oldDictionary' => $oldDict = $child->getAttributeNS(self::PROV_NS, 'ref') ?: null,
+                'dictionary' => $dictQn = $this->resolveProvRef($child, $nsManager),
+                'newDictionary' => $newDictQn = $this->resolveProvRef($child, $nsManager),
+                'oldDictionary' => $oldDictQn = $this->resolveProvRef($child, $nsManager),
                 'keyEntityPair' => $keyEntityPairs[] = $this->parseKeyEntityPair($child, $nsManager),
                 'key' => $removedKeys[] = $this->deserializeAttrValue($child, $nsManager),
                 default => null,
@@ -800,10 +802,6 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             'keyEntityPair',
             'key',
         ]) ?? Attributes::empty();
-
-        $dictQn = $dictionary !== null ? $nsManager->resolve($dictionary) : null;
-        $newDictQn = $newDict !== null ? $nsManager->resolve($newDict) : null;
-        $oldDictQn = $oldDict !== null ? $nsManager->resolve($oldDict) : null;
 
         $record = match ($relName) {
             'hadDictionaryMember' => new DictionaryMembership(
@@ -846,8 +844,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             if ($child->localName === 'key') {
                 $key = $this->deserializeAttrValue($child, $nsManager);
             } elseif ($child->localName === 'entity') {
-                $ref = $child->getAttributeNS(self::PROV_NS, 'ref');
-                $entity = $ref !== '' ? $nsManager->resolve($ref) : null;
+                $entity = $this->resolveProvRef($child, $nsManager);
             }
         }
 
@@ -859,20 +856,22 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
      */
     private function deserializeBundleContent(\DOMElement $el, NamespaceManager $nsManager, array &$bundles): void
     {
-        $id = $this->resolveProvId($el, $nsManager);
+        // The bundle's declarations sit on this element, so XML scopes its
+        // prov:id with them: the identifier resolves in the bundle's own scope.
+        $bundleNsManager = new NamespaceManager($nsManager);
+        $this->extractLocalNamespaces($el, $bundleNsManager);
+
+        $id = $this->resolveProvId($el, $bundleNsManager);
         if ($id === null) {
             return;
         }
-
-        $bundleNsManager = new NamespaceManager($nsManager);
-        $this->extractLocalNamespaces($el, $bundleNsManager);
 
         $bundleRecords = [];
         $nestedBundles = null;
         $this->deserializeChildren($el, $bundleNsManager, $bundleRecords, $nestedBundles);
 
         $bundles[] = new Bundle(
-            identifier: $nsManager->resolve($id),
+            identifier: $id,
             records: $bundleRecords,
             namespaces: $bundleNsManager->getRegisteredNamespaces(),
         );
@@ -883,6 +882,56 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
      * In-scope namespaces visible on the element (via `namespace::*`) include ancestors too; we
      * filter those out by comparing against the parent element's lookup.
      */
+    /**
+     * Whether any element other than the root and the bundleContent elements
+     * declares a namespace. Only then can a QName resolve differently at its
+     * own element than through the namespace managers, which hold exactly the
+     * root's and each bundle's declarations.
+     *
+     * Every declaration spells "xmlns" in the input, and the root's and each
+     * bundleContent's own declarations show up as in-scope namespace nodes
+     * their parent lacks. More "xmlns" in the input than those account for
+     * means a declaration somewhere else, or the word inside a value, which
+     * only costs the shortcut. A bundleContent that rebinds an inherited
+     * prefix adds no node, so it keeps the per-element resolution too.
+     */
+    private function hasElementLocalDeclarations(\DOMDocument $dom, string $data): bool
+    {
+        $xpath = new \DOMXPath($dom);
+        $xpath->registerNamespace('prov', self::PROV_NS);
+        // @mago-expect analysis:mixed-assignment
+        $scopes = $xpath->query('/prov:document | //prov:bundleContent');
+        if (!$scopes instanceof \DOMNodeList) {
+            return true;
+        }
+
+        $known = 0;
+        foreach ($scopes as $scope) {
+            if (!$scope instanceof \DOMElement) {
+                return true;
+            }
+            // @mago-expect analysis:mixed-assignment
+            $own = $xpath->query('namespace::*', $scope);
+            if (!$own instanceof \DOMNodeList) {
+                return true;
+            }
+            // The root's parent is the document node, whose only in-scope
+            // namespace is the implicit xml one.
+            $inherited = 1;
+            $parent = $scope->parentNode;
+            if ($parent instanceof \DOMElement) {
+                // @mago-expect analysis:mixed-assignment
+                $parentNodes = $xpath->query('namespace::*', $parent);
+                if (!$parentNodes instanceof \DOMNodeList) {
+                    return true;
+                }
+                $inherited = $parentNodes->length;
+            }
+            $known += max(0, $own->length - $inherited);
+        }
+        return substr_count($data, 'xmlns') > $known;
+    }
+
     private function extractLocalNamespaces(\DOMElement $el, NamespaceManager $target): void
     {
         $ownerDoc = $el->ownerDocument;
@@ -949,54 +998,88 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         }
     }
 
-    private function getProvId(\DOMElement $el): ?string
+    /**
+     * The `prov:id` of an element, resolved in that element's namespace
+     * context, or null when it carries none.
+     */
+    private function resolveProvId(\DOMElement $el, NamespaceManager $nsManager): ?QualifiedName
     {
         $id = $el->getAttributeNS(self::PROV_NS, 'id');
-        return $id !== '' ? $id : null;
-    }
-
-    private function resolveProvId(\DOMElement $el, NamespaceManager $nsManager): ?string
-    {
-        $id = $this->getProvId($el);
-        if ($id === null) {
-            return null;
-        }
-        return $this->resolveQNameInContext($id, $el, $nsManager);
+        return $id !== '' ? $this->resolveQNameInContext($id, $el, $nsManager) : null;
     }
 
     /**
-     * Resolve a prov:id or prov:ref value in the element's namespace context.
-     * Unprefixed QNames use the element-local default namespace.
+     * The `prov:ref` of an element, resolved in that element's namespace
+     * context, or null when it carries none.
      */
-    private function resolveQNameInContext(string $value, \DOMElement $el, NamespaceManager $nsManager): string
+    private function resolveProvRef(\DOMElement $el, NamespaceManager $nsManager): ?QualifiedName
     {
-        // Already prefixed: the caller resolves it against the namespace manager.
-        if (str_contains($value, ':')) {
-            return $value;
+        $ref = $el->getAttributeNS(self::PROV_NS, 'ref');
+        return $ref !== '' ? $this->resolveQNameInContext($ref, $el, $nsManager) : null;
+    }
+
+    /**
+     * Resolves a lexical XML QName at the element it occurs on: a prov:id, a
+     * prov:ref, an xsi:type, or the text of a QName-typed value.
+     *
+     * XML binds a prefix at the element that uses it, so a declaration written
+     * only on that element is in scope for the value even when the document
+     * root never declares it. The DOM answers that lookup; the namespace
+     * manager is the fallback for a name the DOM cannot bind (a blank node, or
+     * a prefix the parser registered but XML never declared).
+     *
+     * @throws \Prov\Exception\NamespaceException
+     *   When neither the element context nor the manager can resolve the name.
+     */
+    private function resolveQNameInContext(string $value, \DOMElement $el, NamespaceManager $nsManager): QualifiedName
+    {
+        // A blank label is not a QName. Without element-local declarations the
+        // managers hold every binding, and resolve() answers from its cache.
+        if (!$this->resolveAtElement || str_starts_with($value, '_:')) {
+            return $nsManager->resolve($value);
         }
 
-        // Unprefixed: check for element-local default namespace.
-        $defaultUri = $el->lookupNamespaceURI(null);
-        if ($defaultUri !== null) {
-            // Find a registered prefix for this URI.
-            foreach ($nsManager->getRegisteredNamespaces() as $ns) {
-                if ($ns->uri === $defaultUri) {
-                    return $ns->prefix . ':' . $value;
-                }
+        // The element binds the prefix (or the default) the way the manager
+        // does in nearly every remaining case too, and resolve() is cached, so
+        // repeated ids and refs share one QualifiedName instance.
+        $colon = strpos($value, ':');
+        if ($colon === false) {
+            $defaultUri = $el->lookupNamespaceURI(null);
+            if (
+                $defaultUri === null
+                || $defaultUri === ''
+                || $value === ''
+                || $nsManager->getDefaultNamespace()?->uri === $defaultUri
+            ) {
+                return $nsManager->resolve($value);
             }
-            // No registered prefix: walk up to check parent namespace managers.
-            $resolved = $nsManager->resolveUri($defaultUri . $value);
-            if ($resolved !== null) {
-                return (string) $resolved;
-            }
-            // Register a synthetic namespace so the caller can resolve it.
-            $syntheticPrefix = '_ns' . crc32($defaultUri);
-            $ns = new ProvNamespace($syntheticPrefix, $defaultUri);
-            $nsManager->addOrReplace($ns);
-            return $syntheticPrefix . ':' . $value;
+            return $this->namespaceFor($defaultUri, $nsManager, 'default')->qualifiedName($value);
         }
 
-        return $value;
+        $prefix = substr($value, 0, $colon);
+        $localPart = substr($value, $colon + 1);
+        $uri = $prefix !== '' ? $el->lookupNamespaceURI($prefix) : null;
+        if ($uri === null || $uri === '' || $localPart === '' || $nsManager->getNamespace($prefix)?->uri === $uri) {
+            return $nsManager->resolve($value);
+        }
+        return $this->namespaceFor($uri, $nsManager, $prefix)->qualifiedName($localPart);
+    }
+
+    /**
+     * The ProvNamespace to build a name on when the element binds `$prefix` to
+     * a URI the manager does not bind it to. Reuses a visible declaration of
+     * that URI, so records parsed from one document share namespace instances
+     * and keep the document's own prefixes; falls back to the element-local
+     * binding.
+     */
+    private function namespaceFor(string $uri, NamespaceManager $nsManager, string $prefix): ProvNamespace
+    {
+        foreach ($nsManager->getVisibleNamespaces() as $ns) {
+            if ($ns->uri === $uri && $ns->prefix !== 'default') {
+                return $ns;
+            }
+        }
+        return new ProvNamespace($prefix, $uri);
     }
 
     /**
@@ -1088,18 +1171,13 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             if (
                 $xsiType === 'xsd:QName'
                 || str_ends_with($xsiType, ':QName')
-                && ValueIdentity::normalizeDatatypeUri($nsManager->resolve($xsiType)->getUri())
-                    === ValueIdentity::XSD_QNAME_URI
+                && ValueIdentity::normalizeDatatypeUri(
+                    $this->resolveQNameInContext($xsiType, $el, $nsManager)->getUri(),
+                ) === ValueIdentity::XSD_QNAME_URI
             ) {
-                $localNs = $nsManager;
-                $defaultUri = $el->lookupNamespaceURI(null);
-                if ($defaultUri !== null) {
-                    $localNs = new NamespaceManager($nsManager);
-                    $localNs->setDefault(new ProvNamespace('default', $defaultUri));
-                }
-                return $localNs->resolve($el->textContent);
+                return $this->resolveQNameInContext($el->textContent, $el, $nsManager);
             }
-            $datatype = $nsManager->resolve($xsiType);
+            $datatype = $this->resolveQNameInContext($xsiType, $el, $nsManager);
             // rdf:XMLLiteral carries literal XML content; serialize child nodes instead
             // of calling textContent (which strips element structure).
             if ($datatype->getUri() === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral') {
