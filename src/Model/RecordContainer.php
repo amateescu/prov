@@ -14,6 +14,8 @@ use Prov\Identifier\QualifiedName;
  *
  * Holds the canonical record list plus four typed views (entities, activities,
  * agents, relations) computed at construction time.
+ *
+ * @api
  */
 abstract readonly class RecordContainer
 {

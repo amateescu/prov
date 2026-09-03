@@ -72,6 +72,7 @@ class ConstraintViolationList implements \Countable, \IteratorAggregate
     /**
      * Total number of violations recorded.
      */
+    #[\Override]
     public function count(): int
     {
         return count($this->violations);
@@ -80,6 +81,7 @@ class ConstraintViolationList implements \Countable, \IteratorAggregate
     /**
      * @return \ArrayIterator<int, \Prov\Constraint\ConstraintViolation>
      */
+    #[\Override]
     public function getIterator(): \ArrayIterator
     {
         return new \ArrayIterator($this->violations);

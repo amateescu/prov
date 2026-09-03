@@ -10,6 +10,8 @@ use Prov\Identifier\QualifiedName;
 /**
  * Minimal shape every PROV record satisfies: an optional identifier and
  * an Attributes bag. Implemented by ProvRecord and its subclasses.
+ *
+ * @api
  */
 interface ProvRecordInterface
 {

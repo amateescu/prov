@@ -88,6 +88,7 @@ class ProvNSerializer implements ProvSerializerInterface
     /**
      * {@inheritdoc}
      */
+    #[\Override]
     #[\NoDiscard]
     public function serialize(Document $document): string
     {

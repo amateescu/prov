@@ -75,6 +75,7 @@ class JsonLdSerializer implements ProvSerializerInterface
      *   When a relation carries an identifier or attributes that PROV-JSONLD
      *   has nowhere to put.
      */
+    #[\Override]
     #[\NoDiscard]
     public function serialize(Document $document): string
     {

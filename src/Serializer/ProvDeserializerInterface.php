@@ -12,6 +12,8 @@ use Prov\Document;
  * Implemented once per supported input format (PROV-JSON, PROV-N, PROV-XML).
  * Prefer the `Prov::deserialize()` facade for normal use; code against this
  * interface when you need to accept any deserializer.
+ *
+ * @api
  */
 interface ProvDeserializerInterface
 {

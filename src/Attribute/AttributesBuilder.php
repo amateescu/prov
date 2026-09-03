@@ -52,7 +52,7 @@ final class AttributesBuilder
      * into the first of them at `build()` time, by the canonical identity in
      * `\Prov\Attribute\ValueIdentity`.
      */
-    public function add(QualifiedName|string $key, QualifiedName|Literal|string|int|float|bool $value): static
+    public function add(QualifiedName|string $key, QualifiedName|Literal|string|int|float|bool $value): self
     {
         $key = $this->resolveKey($key);
         if ($key->getUri() === self::PROV_TYPE_URI && is_string($value)) {
@@ -69,7 +69,7 @@ final class AttributesBuilder
      *
      * @param iterable<\Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool> $values
      */
-    public function addAll(QualifiedName|string $key, iterable $values): static
+    public function addAll(QualifiedName|string $key, iterable $values): self
     {
         foreach ($values as $value) {
             $this->add($key, $value);

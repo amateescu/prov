@@ -244,6 +244,7 @@ readonly class Attributes implements \Countable, \IteratorAggregate
      *
      * @return \Generator<\Prov\Identifier\QualifiedName, \Prov\Identifier\QualifiedName|\Prov\Attribute\Literal|string|int|float|bool>
      */
+    #[\Override]
     public function getIterator(): \Generator
     {
         foreach ($this->data as $uri => $values) {
@@ -257,6 +258,7 @@ readonly class Attributes implements \Countable, \IteratorAggregate
     /**
      * Total number of values across all keys (matches the iteration length).
      */
+    #[\Override]
     public function count(): int
     {
         $count = 0;

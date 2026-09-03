@@ -341,7 +341,7 @@ final class RelationMetadata
         $meta = self::FORMALS[$record::class] ?? [];
         $vars = get_object_vars($record);
         $result = [];
-        foreach ($meta as $prop => $type) {
+        foreach (array_keys($meta) as $prop) {
             $result[$prop] = $vars[$prop] ?? null;
         }
         return $result;

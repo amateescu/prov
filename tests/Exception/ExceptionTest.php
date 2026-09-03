@@ -37,13 +37,13 @@ final class ExceptionTest extends TestCase
 
         try {
             throw new NamespaceException('ns error');
-        } catch (ProvException $e) {
+        } catch (ProvException) {
             $caught[] = 'namespace';
         }
 
         try {
             throw new DeserializationException('deser error');
-        } catch (ProvException $e) {
+        } catch (ProvException) {
             $caught[] = 'deserialization';
         }
 

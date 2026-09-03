@@ -139,6 +139,7 @@ readonly class Literal implements \Stringable
         return $value->format($pattern);
     }
 
+    #[\Override]
     public function __toString(): string
     {
         return $this->value;

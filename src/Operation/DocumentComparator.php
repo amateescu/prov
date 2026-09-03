@@ -124,7 +124,7 @@ final class DocumentComparator
                     . self::describe($record);
             }
         }
-        foreach ($sigsB as $sig => [$record, $countB]) {
+        foreach ($sigsB as $sig => [$record]) {
             if (!isset($sigsA[$sig])) {
                 $messages[] = $scope . 'record only in second: ' . self::describe($record);
             }

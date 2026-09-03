@@ -98,6 +98,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
      * @throws \RuntimeException
      *   If DOMDocument::saveXML fails after building a well-formed tree.
      */
+    #[\Override]
     #[\NoDiscard]
     public function serialize(Document $document): string
     {
@@ -568,6 +569,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     /**
      * {@inheritdoc}
      */
+    #[\Override]
     public function deserialize(string $data): Document
     {
         // DOMDocument::loadXML throws ValueError on empty input (PHP 8.4+); normalize
@@ -748,8 +750,10 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $id = $this->resolveProvId($el, $nsManager);
         $formalMap = RelationMetadata::xmlChildElements()[$relName] ?? [];
 
-        /** @var array<string, \Prov\Identifier\QualifiedName|\DateTimeImmutable> $formals */
-        $formals = [];
+        /** @var array<string, \Prov\Identifier\QualifiedName> $refs */
+        $refs = [];
+        /** @var array<string, \DateTimeImmutable> $times */
+        $times = [];
         $skipChildNames = array_keys($formalMap);
 
         foreach ($el->childNodes as $child) {
@@ -760,9 +764,9 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             if ($childLocalName !== null && isset($formalMap[$childLocalName])) {
                 $ref = $this->resolveProvRef($child, $nsManager);
                 if ($ref !== null) {
-                    $formals[$formalMap[$childLocalName]] = $ref;
+                    $refs[$formalMap[$childLocalName]] = $ref;
                 } elseif ($childLocalName === 'time') {
-                    $formals[$formalMap[$childLocalName]] = $this->parseDateTime($child->textContent);
+                    $times[$formalMap[$childLocalName]] = $this->parseDateTime($child->textContent);
                 }
             }
         }
@@ -773,11 +777,9 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
             $attrs = $attrs->with($nsManager->resolve('prov:type'), $nsManager->resolve('prov:' . $injectedSubtype));
         }
 
-        $q = static fn(string $k) => isset($formals[$k]) && $formals[$k] instanceof QualifiedName ? $formals[$k] : null;
-        $t = static fn(string $k) => isset($formals[$k]) && $formals[$k] instanceof \DateTimeImmutable
-            ? $formals[$k]
-            : null;
-        $rq = fn(string $k) => $this->requireRef($q($k), $k, $relName);
+        $q = static fn(string $k): ?QualifiedName => $refs[$k] ?? null;
+        $t = static fn(string $k): ?\DateTimeImmutable => $times[$k] ?? null;
+        $rq = fn(string $k): QualifiedName => $this->requireRef($q($k), $k, $relName);
 
         $record = match ($relName) {
             'wasGeneratedBy' => new Generation($id, $rq('entity'), $q('activity'), $t('time'), $attrs),

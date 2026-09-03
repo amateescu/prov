@@ -65,6 +65,7 @@ use Prov\Relation\Usage;
  * resolveAttributes(). Native types cannot express the narrow shape and a
  * docblock @param would clone the same long union across every method.
  *
+ * @api
  * @mago-ignore analysis:imprecise-type
  */
 abstract class RecordBuilder

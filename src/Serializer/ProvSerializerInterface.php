@@ -12,6 +12,8 @@ use Prov\Document;
  * Implemented once per supported format (PROV-JSON, PROV-N, PROV-XML,
  * PROV-JSONLD). Prefer the `Prov::serialize()` facade for normal use;
  * code against this interface when you need to accept any serializer.
+ *
+ * @api
  */
 interface ProvSerializerInterface
 {

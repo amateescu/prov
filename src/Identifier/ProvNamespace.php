@@ -66,6 +66,7 @@ readonly class ProvNamespace implements \Stringable
         return new QualifiedName($this, $localPart);
     }
 
+    #[\Override]
     public function __toString(): string
     {
         return $this->uri;

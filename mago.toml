@@ -7,6 +7,7 @@ includes = ["vendor"]
 
 [linter]
 integrations = ["phpunit"]
+minimum-fail-level = "warning"
 
 [linter.rules]
 # --- Threshold adjustments for spec-driven code ---
@@ -36,6 +37,17 @@ assert-description = { enabled = false }     # `assert(expr)` expressions are se
 # Existing tests use `$this->assertXxx(...)`; match that style.
 assertion-style = { style = "this" }
 
+# --- Enabled: off by default, catch real defects ---
+no-dead-store = { enabled = true }
+no-unused-closure-capture = { enabled = true }
+no-unused-static = { enabled = true }
+no-parameter-shadowing = { enabled = true }
+no-assign-in-argument = { enabled = true }
+no-redundant-else = { enabled = true }
+no-redundant-variable = { enabled = true }
+redundant-static = { enabled = true }
+switch-continue-to-break = { enabled = true }
+
 [analyzer]
 # Test code leans on PHPUnit assertions rather than explicit null checks / mixed
 # narrowing (hundreds of benign `mixed-array-access` on json_decode results and
@@ -51,6 +63,20 @@ find-unused-parameters = true
 analyze-dead-code = true
 no-boolean-literal-comparison = true
 check-missing-type-hints = true
+check-closure-missing-type-hints = true
+check-arrow-function-missing-type-hints = true
+find-overly-wide-return-types = true
+check-use-statements = true
+check-name-casing = true
+strict-list-index-checks = true
+
+# Overriding methods carry #[\Override], so a renamed or removed parent method
+# fails analysis instead of silently leaving an orphan.
+check-missing-override = true
+
+# Everything in src/ is public API unless marked @internal. Abstract classes
+# and interfaces are the extension points, so they say so with @api.
+require-api-or-internal = true
 
 # Narrow after property reads, useful with readonly value objects.
 memoize-properties = true
@@ -70,4 +96,72 @@ unchecked-exceptions = [
     # level (the public deserialize() methods, which do declare them).
     "Prov\\Exception\\NamespaceException",
     "Prov\\Exception\\DeserializationException",
+]
+
+# Dependency direction between the layers. The model core (identifiers,
+# attributes, records, relations) knows nothing about the layers built on it,
+# and the builder, serializer, operation, and constraint layers do not depend
+# on each other. The scanner sits on the serializer layer.
+[guard]
+mode = "perimeter"
+
+[[guard.perimeter.restrictions]]
+dependency = "Prov\\Builder\\**"
+deny-from = [
+    "Prov\\Identifier\\",
+    "Prov\\Attribute\\",
+    "Prov\\Model\\",
+    "Prov\\Relation\\",
+    "Prov\\Serializer\\",
+    "Prov\\Operation\\",
+    "Prov\\Constraint\\",
+]
+
+[[guard.perimeter.restrictions]]
+dependency = "Prov\\Serializer\\**"
+deny-from = [
+    "Prov\\Identifier\\",
+    "Prov\\Attribute\\",
+    "Prov\\Model\\",
+    "Prov\\Relation\\",
+    "Prov\\Builder\\",
+    "Prov\\Operation\\",
+    "Prov\\Constraint\\",
+]
+
+[[guard.perimeter.restrictions]]
+dependency = "Prov\\Operation\\**"
+deny-from = [
+    "Prov\\Identifier\\",
+    "Prov\\Attribute\\",
+    "Prov\\Model\\",
+    "Prov\\Relation\\",
+    "Prov\\Builder\\",
+    "Prov\\Serializer\\",
+    "Prov\\Constraint\\",
+]
+
+[[guard.perimeter.restrictions]]
+dependency = "Prov\\Constraint\\**"
+deny-from = [
+    "Prov\\Identifier\\",
+    "Prov\\Attribute\\",
+    "Prov\\Model\\",
+    "Prov\\Relation\\",
+    "Prov\\Builder\\",
+    "Prov\\Serializer\\",
+    "Prov\\Operation\\",
+]
+
+[[guard.perimeter.restrictions]]
+dependency = "Prov\\Scan\\**"
+deny-from = [
+    "Prov\\Identifier\\",
+    "Prov\\Attribute\\",
+    "Prov\\Model\\",
+    "Prov\\Relation\\",
+    "Prov\\Builder\\",
+    "Prov\\Serializer\\",
+    "Prov\\Operation\\",
+    "Prov\\Constraint\\",
 ]

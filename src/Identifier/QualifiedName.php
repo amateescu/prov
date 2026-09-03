@@ -100,6 +100,7 @@ readonly class QualifiedName implements \Stringable
         return str_starts_with($this->uri, '_:');
     }
 
+    #[\Override]
     public function __toString(): string
     {
         return $this->stringForm;

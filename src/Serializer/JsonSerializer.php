@@ -75,6 +75,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
      * @throws \Prov\Exception\ProvException
      *   When two bundles share an identifier (their JSON keys would collide).
      */
+    #[\Override]
     #[\NoDiscard]
     public function serialize(Document $document): string
     {
@@ -139,6 +140,7 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
     /**
      * {@inheritdoc}
      */
+    #[\Override]
     public function deserialize(string $data): Document
     {
         $json = $this->decodeRoot($data);

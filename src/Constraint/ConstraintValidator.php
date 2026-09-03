@@ -197,11 +197,11 @@ class ConstraintValidator
             $seen[$uri] = true;
             $types = array_values(array_unique(array_intersect($index->getEventTypes($uri), $eventClasses)));
             if (count($types) > 1) {
+                $names = array_map(static fn(string $c): string => basename(str_replace('\\', '/', $c)), $types);
                 $violations->add(
                     new ConstraintViolation(
                         ConstraintId::ImpossiblePropertyOverlap,
-                        "Identifier '{$uri}' is used for multiple event types: "
-                            . implode(', ', array_map(static fn($c) => basename(str_replace('\\', '/', $c)), $types)),
+                        "Identifier '{$uri}' is used for multiple event types: " . implode(', ', $names),
                         $uri,
                     ),
                 );

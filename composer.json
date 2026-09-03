@@ -65,12 +65,14 @@
         "mutate": "@php -d memory_limit=2G vendor/bin/infection --threads=max --min-msi=77 --only-covering-test-cases",
         "lint": "mago lint",
         "analyze": "mago analyze",
+        "guard": "mago guard",
         "format": "mago fmt",
         "format:check": "mago fmt --check",
         "check": [
             "@format:check",
             "@lint",
             "@analyze",
+            "@guard",
             "@test"
         ]
     },

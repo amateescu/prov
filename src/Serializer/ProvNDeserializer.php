@@ -64,6 +64,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
     /**
      * {@inheritdoc}
      */
+    #[\Override]
     public function deserialize(string $data): Document
     {
         $this->input = $data;
