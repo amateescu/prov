@@ -428,11 +428,11 @@ final class JsonScanner
      * literal, that is whether it is a typed value tagged as a qualified name.
      * The tag is `prov:QUALIFIED_NAME`, which ProvToolbox and python-prov
      * write and this library writes too, or `xsd:QName`, the spelling in the
-     * 2013 PROV-JSON submission examples. Both are matched by their literal
-     * token first and by their resolved datatype URI after, so a document that
-     * binds another prefix to the PROV or XSD namespace is read the same way.
-     * Anything else, a bare scalar and a literal under any other datatype
-     * included, is data.
+     * 2013 PROV-JSON submission examples. Both are matched by their resolved
+     * datatype URI, so a document that binds another prefix to the PROV or XSD
+     * namespace is read the same way, and one that binds prov or xsd itself to
+     * a foreign namespace gets a literal. Anything else, a bare scalar and a
+     * literal under any other datatype included, is data.
      *
      * The reference-typed formals of a relation always name a record and need
      * no tag; see `formalKinds()`. This is for the positions where either is
@@ -454,10 +454,6 @@ final class JsonScanner
         if (!is_string($type)) {
             return false;
         }
-        if ($type === 'prov:QUALIFIED_NAME' || $type === 'xsd:QName') {
-            return true;
-        }
-
         $datatype = $this->tryResolve($type);
         return $datatype !== null && ValueIdentity::isQualifiedNameDatatype($datatype->getUri());
     }

@@ -102,6 +102,48 @@ final class QualifiedNameDatatypeTest extends TestCase
         $this->assertInstanceOf(Literal::class, $this->deserializedValue($json));
     }
 
+    /**
+     * @return iterable<string, array{array<string, string>, string, string}>
+     */
+    public static function reboundReservedPrefixes(): iterable
+    {
+        yield 'prov rebound' => [
+            ['prov' => 'http://foreign.example/prov#'],
+            'prov:QUALIFIED_NAME',
+            'http://foreign.example/prov#QUALIFIED_NAME',
+        ];
+        yield 'xsd rebound' => [
+            ['xsd' => 'http://foreign.example/xsd#'],
+            'xsd:QName',
+            'http://foreign.example/xsd#QName',
+        ];
+    }
+
+    /**
+     * A document may bind prov or xsd to something else. The datatype spelled
+     * with that prefix is then a foreign datatype and the value stays a
+     * literal on both paths.
+     *
+     * @param array<string, string> $prefixes
+     */
+    #[DataProvider('reboundReservedPrefixes')]
+    public function testReboundReservedPrefixKeepsAForeignDatatype(
+        array $prefixes,
+        string $datatype,
+        string $expectedDatatypeUri,
+    ): void {
+        $json = $this->document($prefixes, $datatype);
+
+        $scanner = new JsonScanner($json);
+        $this->assertFalse($scanner->isQualifiedNameValue(['$' => 'ex:other', 'type' => $datatype]));
+
+        $value = $this->deserializedValue($json);
+        $this->assertInstanceOf(Literal::class, $value);
+        $this->assertSame('ex:other', $value->value);
+        $this->assertInstanceOf(QualifiedName::class, $value->datatype);
+        $this->assertSame($expectedDatatypeUri, $value->datatype->getUri());
+    }
+
     public function testUnknownPrefixIsNotAQualifiedNameAndFailsDeserialization(): void
     {
         $json = $this->document([], 'zz:QUALIFIED_NAME');

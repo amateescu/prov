@@ -1237,15 +1237,12 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
             throw new DeserializationException('Invalid PROV-JSON: typed value "type" must be a string.');
         }
 
-        // Both canonical qualified-name tags are matched by their literal token
-        // first, so the common case skips resolving the type.
-        if ($type === 'prov:QUALIFIED_NAME' || $type === 'xsd:QName') {
-            return $this->resolveQName($lexical, $nsManager);
-        }
-
-        // A document may bind a non-standard prefix to the PROV or XSD namespace
-        // (p:QUALIFIED_NAME, xs:QName); catch that by the resolved datatype URI,
-        // not the raw token. JsonScanner decides through the same helper.
+        // The datatype decides by its resolved URI, never by the raw token. A
+        // document may bind a non-standard prefix to the PROV or XSD namespace
+        // (p:QUALIFIED_NAME, xs:QName), and it may bind prov or xsd itself to
+        // something else, in which case prov:QUALIFIED_NAME is a foreign
+        // datatype and the value stays a literal. JsonScanner decides through
+        // the same helper.
         $datatype = $type !== null ? $this->resolveQName($type, $nsManager) : null;
         if ($datatype !== null && ValueIdentity::isQualifiedNameDatatype($datatype->getUri())) {
             return $this->resolveQName($lexical, $nsManager);
