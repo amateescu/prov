@@ -387,4 +387,38 @@ final class DocumentComparatorTest extends TestCase
 
         $this->assertTrue(DocumentComparator::equals($a->build(), $b));
     }
+
+    public function testXmlLiteralsCompareUpToInterElementWhitespace(): void
+    {
+        $xmlLiteral = new ProvNamespace('rdf', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#')->qualifiedName(
+            'XMLLiteral',
+        );
+        $compact = $this->buildDoc();
+        $compact->entity('ex:e', ['ex:x' => new Literal('<a><b>1</b></a>', $xmlLiteral)]);
+        $pretty = $this->buildDoc();
+        $pretty->entity('ex:e', ['ex:x' => new Literal("<a>\n  <b>1</b>\n</a>", $xmlLiteral)]);
+        $other = $this->buildDoc();
+        $other->entity('ex:e', ['ex:x' => new Literal('<a><b>2</b></a>', $xmlLiteral)]);
+
+        $compactDoc = $compact->build();
+        $this->assertTrue(DocumentComparator::equals($compactDoc, $pretty->build()));
+        $this->assertFalse(DocumentComparator::equals($compactDoc, $other->build()));
+    }
+
+    public function testMalformedXmlLiteralsCompareByRawValue(): void
+    {
+        $xmlLiteral = new ProvNamespace('rdf', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#')->qualifiedName(
+            'XMLLiteral',
+        );
+        $a = $this->buildDoc();
+        $a->entity('ex:e', ['ex:x' => new Literal('<unclosed', $xmlLiteral)]);
+        $same = $this->buildDoc();
+        $same->entity('ex:e', ['ex:x' => new Literal('<unclosed', $xmlLiteral)]);
+        $different = $this->buildDoc();
+        $different->entity('ex:e', ['ex:x' => new Literal('<other', $xmlLiteral)]);
+
+        $aDoc = $a->build();
+        $this->assertTrue(DocumentComparator::equals($aDoc, $same->build()));
+        $this->assertFalse(DocumentComparator::equals($aDoc, $different->build()));
+    }
 }

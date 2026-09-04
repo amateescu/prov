@@ -69,8 +69,7 @@ final class ReservedPrefixRebindingTest extends TestCase
         $xml = Prov::serialize($document, Format::Xml);
         $this->assertStringContainsString('xmlns:prov="' . self::PROV_URI . '"', $xml);
 
-        $dom = new \DOMDocument();
-        $this->assertTrue($dom->loadXML($xml));
+        $dom = \Dom\XMLDocument::createFromString($xml);
         $this->assertSame(self::PROV_URI, $dom->documentElement?->namespaceURI);
 
         $back = Prov::deserialize($xml, Format::Xml);

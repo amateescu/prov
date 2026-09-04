@@ -297,7 +297,7 @@ final class XmlSerializerTest extends TestCase
 
     public function testDeserializeEmptyInputThrowsDeserializationException(): void
     {
-        // DOMDocument::loadXML raises ValueError on empty input starting in PHP 8.4;
+        // Dom\XMLDocument::createFromString raises ValueError on empty input;
         // the library must surface that as its own exception type so callers catching
         // ProvException catch this case.
         $this->expectException(DeserializationException::class);
@@ -393,8 +393,8 @@ final class XmlSerializerTest extends TestCase
         $builder->entity('ex:e1');
         $xml = $this->serializer->serialize($builder->build());
 
-        $dom = new \DOMDocument();
-        $this->assertTrue($dom->loadXML($xml));
+        $dom = \Dom\XMLDocument::createFromString($xml);
+        $this->assertSame('document', $dom->documentElement?->localName);
     }
 
     public function testDeserializeRejectsInternalEntityDoctype(): void
@@ -452,5 +452,181 @@ final class XmlSerializerTest extends TestCase
 
         $this->assertSame(['a'], $attrs->get($this->ex->qualifiedName('0foo')));
         $this->assertSame(['b'], $attrs->get($this->ex->qualifiedName('_0foo')));
+    }
+
+    public function testRootDeclaresXsiAndXsdBindings(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1', ['ex:n' => 1]);
+        $xml = $this->serializer->serialize($builder->build());
+
+        preg_match('~<prov:document[^>]*>~', $xml, $root);
+        $this->assertStringContainsString('xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"', $root[0]);
+        $this->assertStringContainsString('xmlns:xsd="http://www.w3.org/2001/XMLSchema"', $root[0]);
+    }
+
+    public function testPrettyPrintIsOnByDefaultAndCanBeTurnedOff(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1');
+        $doc = $builder->build();
+
+        $this->assertStringContainsString("\n  <prov:entity", new XmlSerializer()->serialize($doc));
+        $this->assertStringNotContainsString("\n  ", new XmlSerializer(prettyPrint: false)->serialize($doc));
+    }
+
+    public function testXmlLiteralKeepsElementStructureThroughRoundTrip(): void
+    {
+        $rdf = new ProvNamespace('rdf', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#');
+        $builder = $this->buildDoc();
+        $builder->addNamespace($rdf);
+        $builder->entity('ex:e1', [
+            'ex:note' => new Literal('<b>bold</b> and <i>italic</i>', $rdf->qualifiedName('XMLLiteral')),
+        ]);
+        $serializer = new XmlSerializer(prettyPrint: false);
+
+        $xml = $serializer->serialize($builder->build());
+        // The fragment is written as child elements, not as escaped text.
+        $this->assertStringContainsString('<b>bold</b> and <i>italic</i>', $xml);
+        $this->assertStringNotContainsString('&lt;b&gt;', $xml);
+
+        $back = $serializer->deserialize($xml);
+        $value = $back->entities[0]->attributes->get($this->ex->qualifiedName('note'))[0];
+        $this->assertInstanceOf(Literal::class, $value);
+        $this->assertSame('http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral', $value->datatype?->getUri());
+        $this->assertSame('<b>bold</b> and <i>italic</i>', $value->value);
+    }
+
+    public function testDefaultNamespaceNamesAreWrittenBare(): void
+    {
+        $default = new ProvNamespace('default', 'http://default.example/');
+        $builder = $this->buildDoc();
+        $builder->setDefaultNamespace($default);
+        $builder->entity('e1', ['note' => 'v']);
+        $xml = $this->serializer->serialize($builder->build());
+
+        $this->assertStringContainsString('xmlns="http://default.example/"', $xml);
+        $this->assertStringContainsString('prov:id="e1"', $xml);
+        $this->assertStringContainsString('<note>v</note>', $xml);
+        $this->assertStringNotContainsString('default:', $xml);
+
+        $back = $this->serializer->deserialize($xml);
+        $this->assertSame('http://default.example/e1', $back->entities[0]->identifier?->getUri());
+        $this->assertSame(['v'], $back->entities[0]->attributes->get($default->qualifiedName('note')));
+    }
+
+    public function testBundleLocalNamespaceIsDeclaredOnBundleContent(): void
+    {
+        $builder = $this->buildDoc();
+        $bundle = $builder->bundle('ex:b1');
+        $bundle->namespace('foo', 'http://foo.example/');
+        $bundle->entity('foo:e1');
+        $xml = $this->serializer->serialize($builder->build());
+
+        $this->assertMatchesRegularExpression('~<prov:bundleContent[^>]*xmlns:foo="http://foo\.example/"~', $xml);
+        $this->assertDoesNotMatchRegularExpression('~<prov:document[^>]*xmlns:foo=~', $xml);
+        $this->assertStringContainsString('prov:id="foo:e1"', $xml);
+    }
+
+    public function testSortRecordsOrdersDocumentAndBundleRecords(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->wasGeneratedBy('ex:e1', 'ex:a1', identifier: 'ex:g1');
+        $builder->agent('ex:ag1');
+        $builder->activity('ex:a1');
+        $builder->entity('ex:e1');
+        $bundle = $builder->bundle('ex:b1');
+        $bundle->activity('ex:a2');
+        $bundle->entity('ex:e2');
+        $doc = $builder->build();
+
+        $ids = static function (string $xml): array {
+            preg_match_all('~<prov:(\w+) prov:id="ex:(\w+)"~', $xml, $m);
+            return $m[2];
+        };
+
+        $this->assertSame(['g1', 'ag1', 'a1', 'e1', 'b1', 'a2', 'e2'], $ids(new XmlSerializer()->serialize($doc)));
+        $this->assertSame(
+            ['e1', 'a1', 'ag1', 'g1', 'b1', 'e2', 'a2'],
+            $ids(new XmlSerializer(sortRecords: true)->serialize($doc)),
+        );
+    }
+
+    public function testDeserializeMalformedXmlReportsTheParserMessage(): void
+    {
+        try {
+            $this->serializer->deserialize(
+                '<prov:document xmlns:prov="http://www.w3.org/ns/prov#"><prov:entity></prov:document>',
+            );
+            $this->fail('Malformed XML must not deserialize.');
+        } catch (DeserializationException $e) {
+            $this->assertStringStartsWith('Invalid PROV-XML: ', $e->getMessage());
+            $this->assertStringContainsString('Opening and ending tag mismatch', $e->getMessage());
+            $this->assertStringNotContainsString("\n", $e->getMessage());
+            $this->assertInstanceOf(\DOMException::class, $e->getPrevious());
+        }
+    }
+
+    public function testDeserializeFailureRestoresLibxmlErrorHandling(): void
+    {
+        $previous = libxml_use_internal_errors(false);
+        try {
+            try {
+                $this->serializer->deserialize('<broken');
+                $this->fail('Malformed XML must not deserialize.');
+            } catch (DeserializationException $e) {
+                $this->assertStringStartsWith('Invalid PROV-XML: ', $e->getMessage());
+            }
+            $this->assertFalse(libxml_use_internal_errors(false), 'the caller\'s error mode is restored');
+            $this->assertSame([], libxml_get_errors(), 'the parser errors are cleared');
+        } finally {
+            libxml_use_internal_errors($previous);
+        }
+    }
+
+    public function testUnknownProvElementsAreIgnored(): void
+    {
+        $xml =
+            '<?xml version="1.0"?>'
+            . '<prov:document xmlns:prov="http://www.w3.org/ns/prov#" xmlns:ex="http://example.org/">'
+            . '<prov:other><prov:thing/></prov:other>'
+            . '<prov:entity prov:id="ex:e1"/>'
+            . '</prov:document>';
+        $doc = $this->serializer->deserialize($xml);
+
+        $this->assertCount(1, $doc->records);
+        $this->assertSame('http://example.org/e1', $doc->entities[0]->identifier?->getUri());
+    }
+
+    public function testDeserializedNamespacesExcludeXmlPlumbing(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1', ['ex:n' => 1]);
+        $back = $this->serializer->deserialize($this->serializer->serialize($builder->build()));
+
+        $prefixes = array_map(static fn(ProvNamespace $ns): string => $ns->prefix, $back->namespaces);
+        $this->assertContains('ex', $prefixes);
+        $this->assertNotContains('xsi', $prefixes);
+    }
+
+    public function testUnderscoreDigitInsideAttributeNameIsUntouched(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1', ['ex:foo_1' => 'a']);
+        $xml = $this->serializer->serialize($builder->build());
+
+        $this->assertStringContainsString('<ex:foo_1>', $xml);
+        $back = $this->serializer->deserialize($xml);
+        $this->assertSame(['a'], $back->entities[0]->attributes->get($this->ex->qualifiedName('foo_1')));
+    }
+
+    public function testIntRangeBoundariesTypeAsInt(): void
+    {
+        $builder = $this->buildDoc();
+        $builder->entity('ex:e1', ['ex:min' => Literal::XSD_INT_MIN, 'ex:max' => Literal::XSD_INT_MAX]);
+        $output = $this->serializer->serialize($builder->build());
+
+        $this->assertSame(2, substr_count($output, 'xsi:type="xsd:int"'));
+        $this->assertStringNotContainsString('xsd:long', $output);
     }
 }

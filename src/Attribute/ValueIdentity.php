@@ -152,25 +152,24 @@ final class ValueIdentity
     {
         $previous = libxml_use_internal_errors(true);
         try {
-            $doc = new \DOMDocument();
-            $doc->preserveWhiteSpace = false;
-            if (!$doc->loadXML('<r xmlns:_="_">' . $value . '</r>', LIBXML_NONET)) {
-                return $value;
-            }
-            $root = $doc->documentElement;
-            if ($root === null) {
-                return $value;
-            }
-            $out = '';
-            foreach ($root->childNodes as $child) {
-                if ($child instanceof \DOMNode) {
-                    $out .= $doc->saveXML($child) ?: '';
-                }
-            }
-            return $out;
+            $doc = \Dom\XMLDocument::createFromString(
+                '<r xmlns:_="_">' . $value . '</r>',
+                LIBXML_NONET | LIBXML_NOBLANKS,
+            );
+        } catch (\DOMException) {
+            return $value;
         } finally {
             libxml_clear_errors();
             libxml_use_internal_errors($previous);
         }
+        $root = $doc->documentElement;
+        if ($root === null) {
+            return $value;
+        }
+        $out = '';
+        foreach ($root->childNodes as $child) {
+            $out .= $doc->saveXml($child) ?: '';
+        }
+        return $out;
     }
 }

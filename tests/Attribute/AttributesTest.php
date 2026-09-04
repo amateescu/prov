@@ -429,4 +429,40 @@ final class AttributesTest extends TestCase
 
         $this->assertSame(['Document', 'Article'], $attrs->get($key));
     }
+
+    public function testDedupeKeepsLanguageTaggedLiteralsWithDifferentValues(): void
+    {
+        $key = $this->prov->qualifiedName('label');
+        $uri = $key->getUri();
+
+        $attrs = new Attributes([
+            $uri => [
+                new Literal('hello', null, 'en'),
+                new Literal('bonjour', null, 'en'),
+                new Literal('hello', null, 'en'),
+            ],
+        ], [$uri => $key]);
+
+        // Same tag, different value: two values. The repeated pair collapses.
+        $this->assertCount(2, $attrs);
+    }
+
+    public function testDedupeTypesIntRangeBoundariesAsXsdInt(): void
+    {
+        $key = $this->prov->qualifiedName('value');
+        $uri = $key->getUri();
+
+        $attrs = new Attributes([
+            $uri => [
+                Literal::XSD_INT_MAX,
+                Literal::int(Literal::XSD_INT_MAX),
+                Literal::XSD_INT_MIN,
+                Literal::int(Literal::XSD_INT_MIN),
+            ],
+        ], [$uri => $key]);
+
+        // The boundary values are still xsd:int, so each native int is one value
+        // with its typed Literal.
+        $this->assertCount(2, $attrs);
+    }
 }

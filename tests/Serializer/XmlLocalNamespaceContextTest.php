@@ -161,6 +161,7 @@ final class XmlLocalNamespaceContextTest extends TestCase
     public function testUndeclaredPrefixStillFails(): void
     {
         $this->expectException(\Prov\Exception\DeserializationException::class);
+        $this->expectExceptionMessage("Invalid PROV-XML: Prefix 'nowhere' is not registered");
         $this->parse('<prov:entity prov:id="nowhere:e1"/>');
     }
 
