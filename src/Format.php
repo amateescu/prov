@@ -29,14 +29,22 @@ enum Format: string
 
     /**
      * Returns a serializer for this format.
+     *
+     * @param bool|null $prettyPrint
+     *   Whether to indent the output. Null keeps each format's own default:
+     *   PROV-XML and PROV-N indent, PROV-JSON and PROV-JSONLD do not. For
+     *   PROV-N, false writes every record at column zero.
+     * @param bool $sortRecords
+     *   Whether to order records into PROV-DM concept order instead of keeping
+     *   the document's own order. Namespace declarations are always sorted.
      */
-    public function createSerializer(): ProvSerializerInterface
+    public function createSerializer(?bool $prettyPrint = null, bool $sortRecords = false): ProvSerializerInterface
     {
         return match ($this) {
-            self::Json => new JsonSerializer(),
-            self::ProvN => new ProvNSerializer(),
-            self::Xml => new XmlSerializer(),
-            self::JsonLd => new JsonLdSerializer(),
+            self::Json => new JsonSerializer(prettyPrint: $prettyPrint ?? false, sortRecords: $sortRecords),
+            self::ProvN => new ProvNSerializer(indentation: $prettyPrint ?? true ? 2 : 0, sortRecords: $sortRecords),
+            self::Xml => new XmlSerializer(prettyPrint: $prettyPrint ?? true, sortRecords: $sortRecords),
+            self::JsonLd => new JsonLdSerializer(prettyPrint: $prettyPrint ?? false, sortRecords: $sortRecords),
         };
     }
 

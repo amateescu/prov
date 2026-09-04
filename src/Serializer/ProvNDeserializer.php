@@ -23,6 +23,7 @@ use Prov\Relation\Attribution;
 use Prov\Relation\Communication;
 use Prov\Relation\Delegation;
 use Prov\Relation\Derivation;
+use Prov\Relation\DerivationSubtype;
 use Prov\Relation\Dictionary\DictionaryEntry;
 use Prov\Relation\Dictionary\DictionaryInsertion;
 use Prov\Relation\Dictionary\DictionaryMembership;
@@ -353,10 +354,10 @@ class ProvNDeserializer implements ProvDeserializerInterface
 
         $this->expect(')');
 
-        if (isset(RelationMetadata::DERIVATION_SUBTYPES[$kw])) {
+        $subtype = DerivationSubtype::fromKeyword($kw);
+        if ($subtype !== null) {
             [$id, $args, $attrs] = $parsed;
-            $typeValue = $nsManager->resolve('prov:' . RelationMetadata::DERIVATION_SUBTYPES[$kw]);
-            $attrs = ($attrs ?? Attributes::empty())->with($nsManager->resolve('prov:type'), $typeValue);
+            $attrs = ($attrs ?? Attributes::empty())->with($nsManager->resolve('prov:type'), $subtype->qualifiedName());
             $parsed = [$id, $args, $attrs];
             $kw = 'wasDerivedFrom';
         }

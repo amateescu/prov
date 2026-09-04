@@ -300,6 +300,36 @@ final class DocumentBuilderTest extends TestCase
         $this->assertCount(1, $der->attributes->get($prov->qualifiedName('label')));
     }
 
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function derivationSubtypeShortcutMethods(): iterable
+    {
+        foreach (self::derivationSubtypeShortcuts() as $name => [$method]) {
+            yield $name => [$method];
+        }
+    }
+
+    #[DataProvider('derivationSubtypeShortcutMethods')]
+    public function testDerivationSubtypeShortcutTakesActivityGenerationAndUsage(string $method): void
+    {
+        $this->builder->{$method}(
+            generatedEntity: 'ex:e2',
+            usedEntity: 'ex:e1',
+            activity: 'ex:a1',
+            generation: 'ex:g1',
+            usage: 'ex:u1',
+            identifier: 'ex:d1',
+        );
+        $doc = $this->builder->build();
+
+        $der = $doc->getRecordsByType(Derivation::class)[0];
+        $this->assertSame('http://example.org/d1', $der->identifier->uri);
+        $this->assertSame('http://example.org/a1', $der->activity->uri);
+        $this->assertSame('http://example.org/g1', $der->generation->uri);
+        $this->assertSame('http://example.org/u1', $der->usage->uri);
+    }
+
     public function testWasAttributedTo(): void
     {
         $this->builder->wasAttributedTo(entity: 'ex:e1', agent: 'ex:ag1');

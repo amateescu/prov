@@ -10,6 +10,9 @@ use Prov\Model\ProvRelation;
 
 /**
  * An activity used (read, consumed, or referenced) an entity.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Usage extends ProvRelation
 {

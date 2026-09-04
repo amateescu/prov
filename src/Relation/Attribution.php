@@ -11,6 +11,9 @@ use Prov\Model\ProvRelation;
 /**
  * An entity is credited to an agent without naming a specific activity.
  * Reach for Association instead when the activity is also known.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Attribution extends ProvRelation
 {

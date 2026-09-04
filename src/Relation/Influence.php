@@ -11,6 +11,9 @@ use Prov\Model\ProvRelation;
 /**
  * A generic "was influenced by" link between any two records. Used when
  * no more specific relation (derivation, association, etc.) applies.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Influence extends ProvRelation
 {

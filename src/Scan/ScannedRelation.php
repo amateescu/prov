@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Prov\Scan;
 
+use Prov\Relation\DerivationSubtype;
+
 /**
  * One relation read straight from decoded PROV-JSON, without building a
  * ProvRelation. Carries the section it came from, its own id, its formal
@@ -27,12 +29,18 @@ final readonly class ScannedRelation
      * @param array<string, list<string|int|float|bool|array<string, mixed>>> $attributes
      *   The relation's non-formal attributes, keyed by the full URI of the
      *   attribute name, each mapping to its list of normalized values.
+     * @param \Prov\Relation\DerivationSubtype|null $derivationSubtype
+     *   For a `wasDerivedFrom` relation, the typed-derivation subtype its
+     *   `prov:type` names (Revision, Quotation, PrimarySource), matching what
+     *   `Derivation::subtype()` reports on the deserialized record. Null for a
+     *   plain derivation and for every other section.
      */
     public function __construct(
         public string $section,
         public string $id,
         public array $endpoints,
         public array $attributes,
+        public ?DerivationSubtype $derivationSubtype = null,
     ) {}
 
     /**

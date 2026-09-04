@@ -76,6 +76,8 @@ PROV serializations are unordered (a document is a set of records, namespaces a 
 
 ```php
 $json = new JsonSerializer(sortRecords: true)->serialize($doc);
+// Or through the format enum, which also takes prettyPrint:
+$json = Format::Json->createSerializer(sortRecords: true)->serialize($doc);
 ```
 
 ### Reserved prefixes

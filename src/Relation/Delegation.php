@@ -11,6 +11,9 @@ use Prov\Model\ProvRelation;
 /**
  * One agent (the delegate) acted on behalf of another (the responsible
  * agent), optionally in the context of a specific activity.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Delegation extends ProvRelation
 {

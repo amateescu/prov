@@ -26,6 +26,7 @@ use Prov\Relation\Attribution;
 use Prov\Relation\Communication;
 use Prov\Relation\Delegation;
 use Prov\Relation\Derivation;
+use Prov\Relation\DerivationSubtype;
 use Prov\Relation\Dictionary\DictionaryEntry;
 use Prov\Relation\Dictionary\DictionaryInsertion;
 use Prov\Relation\Dictionary\DictionaryMembership;
@@ -711,12 +712,12 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $relName = $el->localName;
         // PROV-XML names the Derivation subtype shortcut elements after their
         // prov:type local name, lowercased (revision, quotation, primarySource).
-        /** @var array<string, string>|null $subtypeElements */
+        /** @var array<string, \Prov\Relation\DerivationSubtype>|null $subtypeElements */
         static $subtypeElements = null;
         if ($subtypeElements === null) {
             $subtypeElements = [];
-            foreach (RelationMetadata::DERIVATION_SUBTYPES as $subtype) {
-                $subtypeElements[lcfirst($subtype)] = $subtype;
+            foreach (DerivationSubtype::cases() as $subtype) {
+                $subtypeElements[lcfirst($subtype->value)] = $subtype;
             }
         }
         $injectedSubtype = $subtypeElements[$relName] ?? null;
@@ -750,7 +751,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
         $attrs = $this->deserializeChildAttributes($el, $nsManager, $skipChildNames) ?? Attributes::empty();
 
         if ($injectedSubtype !== null) {
-            $attrs = $attrs->with($nsManager->resolve('prov:type'), $nsManager->resolve('prov:' . $injectedSubtype));
+            $attrs = $attrs->with($nsManager->resolve('prov:type'), $injectedSubtype->qualifiedName());
         }
 
         $q = static fn(string $k): ?QualifiedName => $refs[$k] ?? null;

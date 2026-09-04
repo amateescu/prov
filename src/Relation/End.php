@@ -11,6 +11,9 @@ use Prov\Model\ProvRelation;
 /**
  * An activity was ended at a given time, optionally by a triggering entity
  * or a finishing activity.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class End extends ProvRelation
 {

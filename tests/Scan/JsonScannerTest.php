@@ -6,6 +6,7 @@ namespace Prov\Tests\Scan;
 
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Prov\Attribute\Literal;
 use Prov\Builder\DocumentBuilder;
 use Prov\Entity;
 use Prov\Exception\DeserializationException;
@@ -13,6 +14,8 @@ use Prov\Identifier\ProvNamespace;
 use Prov\Model\ProvRelation;
 use Prov\Model\RelationMetadata;
 use Prov\Operation\ProvGraph;
+use Prov\Relation\Derivation;
+use Prov\Relation\DerivationSubtype;
 use Prov\Relation\Dictionary\DictionaryEntry;
 use Prov\Scan\JsonScanner;
 use Prov\Scan\ScannedAgent;
@@ -169,6 +172,56 @@ final class JsonScannerTest extends TestCase
         $this->assertSame(['done'], $relation->attributes['http://example.org/note']);
         // A formal endpoint is not reported as an attribute.
         $this->assertArrayNotHasKey('http://www.w3.org/ns/prov#entity', $relation->attributes);
+    }
+
+    public function testDerivationSubtypeMatchesDeserializedRecord(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder->wasRevisionOf(generatedEntity: 'ex:e2', usedEntity: 'ex:e1', identifier: 'ex:rev');
+        $builder->wasDerivedFrom(generatedEntity: 'ex:e3', usedEntity: 'ex:e1', identifier: 'ex:plain');
+        // A string literal spelled like the type name is not a qualified name.
+        $builder->wasDerivedFrom(generatedEntity: 'ex:e4', usedEntity: 'ex:e1', identifier: 'ex:literal', attributes: [
+            'prov:type' => new Literal('prov:Quotation'),
+        ]);
+        $builder->wasGeneratedBy(entity: 'ex:e2', activity: 'ex:a1', identifier: 'ex:gen');
+        $json = new JsonSerializer()->serialize($builder->build());
+        $scanner = new JsonScanner($json);
+
+        $scanned = [];
+        foreach ($scanner->relations('wasDerivedFrom') as $relation) {
+            $scanned[$relation->id] = $relation->derivationSubtype;
+        }
+        $this->assertSame(
+            ['ex:rev' => DerivationSubtype::Revision, 'ex:plain' => null, 'ex:literal' => null],
+            $scanned,
+        );
+        $this->assertNull($scanner->relations('wasGeneratedBy')[0]->derivationSubtype);
+
+        // The scan-side reader agrees with the model-side one.
+        foreach (new JsonSerializer()
+            ->deserialize($json)
+            ->getRecordsByType(Derivation::class) as $derivation) {
+            $this->assertSame($scanned[(string) $derivation->identifier], $derivation->subtype());
+        }
+    }
+
+    public function testDerivationSubtypeIsNamespaceAware(): void
+    {
+        $json = json_encode([
+            'prefix' => ['p' => 'http://www.w3.org/ns/prov#', 'ex' => 'http://example.org/'],
+            'wasDerivedFrom' => [
+                'ex:d1' => [
+                    'p:generatedEntity' => 'ex:e2',
+                    'p:usedEntity' => 'ex:e1',
+                    'p:type' => ['$' => 'p:PrimarySource', 'type' => 'p:QUALIFIED_NAME'],
+                ],
+            ],
+        ]);
+        $this->assertIsString($json);
+
+        $relation = new JsonScanner($json)->relations('wasDerivedFrom')[0];
+        $this->assertSame(DerivationSubtype::PrimarySource, $relation->derivationSubtype);
     }
 
     public function testRelationsReferencingSpansSections(): void

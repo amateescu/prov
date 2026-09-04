@@ -21,6 +21,7 @@ use Prov\Relation\Attribution;
 use Prov\Relation\Communication;
 use Prov\Relation\Delegation;
 use Prov\Relation\Derivation;
+use Prov\Relation\DerivationSubtype;
 use Prov\Relation\Dictionary\DictionaryEntry;
 use Prov\Relation\Dictionary\DictionaryInsertion;
 use Prov\Relation\Dictionary\DictionaryMembership;
@@ -438,58 +439,79 @@ abstract class RecordBuilder
     }
 
     /**
-     * PROV-N shortcut for a Derivation typed as `prov:Revision`.
+     * PROV-N shortcut for a Derivation typed as `prov:Revision`. Takes the same
+     * optional activity, generation, and usage as `wasDerivedFrom()`.
      *
      * @see https://www.w3.org/TR/prov-dm/#term-Revision
      */
     public function wasRevisionOf(
         QualifiedName|string $generatedEntity,
         QualifiedName|string $usedEntity,
+        QualifiedName|string|null $activity = null,
+        QualifiedName|string|null $generation = null,
+        QualifiedName|string|null $usage = null,
         Attributes|array|null $attributes = null,
         QualifiedName|string|null $identifier = null,
     ): static {
         return $this->wasDerivedFrom(
             generatedEntity: $generatedEntity,
             usedEntity: $usedEntity,
-            attributes: $this->injectProvType($attributes, 'Revision'),
+            activity: $activity,
+            generation: $generation,
+            usage: $usage,
+            attributes: $this->injectProvType($attributes, DerivationSubtype::Revision),
             identifier: $identifier,
         );
     }
 
     /**
-     * PROV-N shortcut for a Derivation typed as `prov:Quotation`.
+     * PROV-N shortcut for a Derivation typed as `prov:Quotation`. Takes the same
+     * optional activity, generation, and usage as `wasDerivedFrom()`.
      *
      * @see https://www.w3.org/TR/prov-dm/#term-Quotation
      */
     public function wasQuotedFrom(
         QualifiedName|string $generatedEntity,
         QualifiedName|string $usedEntity,
+        QualifiedName|string|null $activity = null,
+        QualifiedName|string|null $generation = null,
+        QualifiedName|string|null $usage = null,
         Attributes|array|null $attributes = null,
         QualifiedName|string|null $identifier = null,
     ): static {
         return $this->wasDerivedFrom(
             generatedEntity: $generatedEntity,
             usedEntity: $usedEntity,
-            attributes: $this->injectProvType($attributes, 'Quotation'),
+            activity: $activity,
+            generation: $generation,
+            usage: $usage,
+            attributes: $this->injectProvType($attributes, DerivationSubtype::Quotation),
             identifier: $identifier,
         );
     }
 
     /**
-     * PROV-N shortcut for a Derivation typed as `prov:PrimarySource`.
+     * PROV-N shortcut for a Derivation typed as `prov:PrimarySource`. Takes the same
+     * optional activity, generation, and usage as `wasDerivedFrom()`.
      *
      * @see https://www.w3.org/TR/prov-dm/#term-PrimarySource
      */
     public function hadPrimarySource(
         QualifiedName|string $generatedEntity,
         QualifiedName|string $usedEntity,
+        QualifiedName|string|null $activity = null,
+        QualifiedName|string|null $generation = null,
+        QualifiedName|string|null $usage = null,
         Attributes|array|null $attributes = null,
         QualifiedName|string|null $identifier = null,
     ): static {
         return $this->wasDerivedFrom(
             generatedEntity: $generatedEntity,
             usedEntity: $usedEntity,
-            attributes: $this->injectProvType($attributes, 'PrimarySource'),
+            activity: $activity,
+            generation: $generation,
+            usage: $usage,
+            attributes: $this->injectProvType($attributes, DerivationSubtype::PrimarySource),
             identifier: $identifier,
         );
     }
@@ -890,11 +912,11 @@ abstract class RecordBuilder
      * Adds a `prov:type = prov:<subtype>` entry to `$attrs`, resolving the caller's
      * input (null, array, or Attributes) to an Attributes instance first.
      */
-    private function injectProvType(Attributes|array|null $attrs, string $subtype): Attributes
+    private function injectProvType(Attributes|array|null $attrs, DerivationSubtype $subtype): Attributes
     {
         return $this->resolveAttributes($attrs)->with(
             $this->namespaceManager->resolve('prov:type'),
-            $this->namespaceManager->resolve('prov:' . $subtype),
+            $subtype->qualifiedName(),
         );
     }
 

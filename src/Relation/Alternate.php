@@ -12,6 +12,9 @@ use Prov\Model\ProvRelation;
  * Two entities refer to the same real-world thing from different viewpoints.
  * Unlike Specialization, the relation is symmetric: neither entity is the
  * narrower one.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Alternate extends ProvRelation
 {

@@ -10,6 +10,9 @@ use Prov\Model\ProvRelation;
 
 /**
  * An entity was generated (produced) by an activity.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Generation extends ProvRelation
 {

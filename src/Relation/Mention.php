@@ -11,6 +11,9 @@ use Prov\Model\ProvRelation;
 /**
  * An entity in one bundle refers to an entity described in another bundle.
  * Lets records carry cross-bundle references without flattening the bundles.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Mention extends ProvRelation
 {

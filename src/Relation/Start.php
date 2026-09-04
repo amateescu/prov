@@ -11,6 +11,9 @@ use Prov\Model\ProvRelation;
 /**
  * An activity was started at a given time, optionally in response to a
  * triggering entity or a starter activity.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Start extends ProvRelation
 {

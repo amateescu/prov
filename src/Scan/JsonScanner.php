@@ -11,6 +11,7 @@ use Prov\Identifier\NamespaceManager;
 use Prov\Identifier\ProvNamespace;
 use Prov\Identifier\QualifiedName;
 use Prov\Model\RelationMetadata;
+use Prov\Relation\DerivationSubtype;
 use Prov\Serializer\QualifiedNameEscaper;
 
 /**
@@ -53,6 +54,8 @@ use Prov\Serializer\QualifiedNameEscaper;
 final class JsonScanner
 {
     private const string XSD_URI = 'http://www.w3.org/2001/XMLSchema#';
+
+    private const string PROV_TYPE_URI = 'http://www.w3.org/ns/prov#type';
 
     /** The element sections, in PROV-JSON layout order. */
     private const array ELEMENT_SECTIONS = ['entity', 'activity', 'agent'];
@@ -672,7 +675,32 @@ final class JsonScanner
                 $attributes[$uri][] = $value;
             }
         }
-        return new ScannedRelation($section, $id, $endpoints, $attributes);
+        $subtype = $section === 'wasDerivedFrom' ? $this->derivationSubtype($attributes) : null;
+        return new ScannedRelation($section, $id, $endpoints, $attributes, $subtype);
+    }
+
+    /**
+     * The typed-derivation subtype a relation's `prov:type` values name, read
+     * the way `Derivation::subtype()` reads it after a full deserialize: only
+     * a value written as a qualified name counts, and it is matched by
+     * resolved URI, so the prefix the document used does not matter.
+     *
+     * @param array<string, list<string|int|float|bool|array<string, mixed>>> $attributes
+     *   The relation's normalized non-formal attributes, keyed by URI.
+     */
+    private function derivationSubtype(array $attributes): ?DerivationSubtype
+    {
+        foreach ($attributes[self::PROV_TYPE_URI] ?? [] as $value) {
+            if (!$this->isQualifiedNameValue($value)) {
+                continue;
+            }
+            $type = $this->resolveReference($value);
+            $subtype = $type === null ? null : DerivationSubtype::fromType($type);
+            if ($subtype !== null) {
+                return $subtype;
+            }
+        }
+        return null;
     }
 
     /**

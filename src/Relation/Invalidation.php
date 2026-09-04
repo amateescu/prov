@@ -11,6 +11,9 @@ use Prov\Model\ProvRelation;
 /**
  * An entity was invalidated (destroyed, consumed, or made unusable) by an
  * activity at a given time.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Invalidation extends ProvRelation
 {

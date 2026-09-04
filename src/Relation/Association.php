@@ -11,6 +11,9 @@ use Prov\Model\ProvRelation;
 /**
  * An activity was carried out in association with an agent, optionally
  * following a plan (an entity describing how to perform the activity).
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Association extends ProvRelation
 {

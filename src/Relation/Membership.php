@@ -10,6 +10,9 @@ use Prov\Model\ProvRelation;
 
 /**
  * An entity is a member of a collection entity.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class Membership extends ProvRelation
 {

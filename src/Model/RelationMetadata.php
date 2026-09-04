@@ -289,20 +289,6 @@ final class RelationMetadata
     ];
 
     /**
-     * PROV-N / PROV-XML shortcut forms that desugar to a Derivation carrying a
-     * `prov:type` attribute, keyed by the PROV-N keyword. The values are the
-     * local names of the prov:type QualifiedName and double as the PROV-XML
-     * shortcut element names (lowercased first letter).
-     *
-     * @var array<string, string>
-     */
-    public const array DERIVATION_SUBTYPES = [
-        'wasRevisionOf' => 'Revision',
-        'wasQuotedFrom' => 'Quotation',
-        'hadPrimarySource' => 'PrimarySource',
-    ];
-
-    /**
      * Maps PROV-JSON relation keys to their PROV-XML child element layout:
      * element local name => formal property name, with array-typed properties
      * marked by an underscore-prefixed element name (their content needs
@@ -435,38 +421,19 @@ final class RelationMetadata
 
     /**
      * The PROV-N keyword for a relation, e.g. `wasGeneratedBy`, `used`,
-     * `specializationOf`. A Derivation carrying a `prov:type` of `prov:Revision`,
-     * `prov:Quotation`, or `prov:PrimarySource` reports the subtype shortcut
+     * `specializationOf`. A typed derivation (see
+     * `\Prov\Relation\DerivationSubtype`) reports its shortcut keyword
      * (`wasRevisionOf`, ...) rather than the bare `wasDerivedFrom`.
      */
     public static function relationLabel(ProvRelation $relation): string
     {
         if ($relation instanceof Derivation) {
-            $subtype = self::derivationSubtypeLabel($relation);
-            if ($subtype !== null) {
-                return $subtype;
+            $keyword = $relation->subtype()?->keyword();
+            if ($keyword !== null) {
+                return $keyword;
             }
         }
         return self::JSON_KEYS[$relation::class] ?? $relation::class;
-    }
-
-    /**
-     * The derivation-subtype keyword (`wasRevisionOf`, `wasQuotedFrom`,
-     * `hadPrimarySource`) carried by a Derivation's `prov:type` attribute, or
-     * null when it is a plain derivation.
-     */
-    private static function derivationSubtypeLabel(Derivation $relation): ?string
-    {
-        $types = $relation->attributes->all()['http://www.w3.org/ns/prov#type'] ?? [];
-        foreach ($types as $type) {
-            if ($type instanceof QualifiedName && $type->namespace->uri === 'http://www.w3.org/ns/prov#') {
-                $keyword = array_search($type->localPart, self::DERIVATION_SUBTYPES, true);
-                if ($keyword !== false) {
-                    return $keyword;
-                }
-            }
-        }
-        return null;
     }
 
     /**

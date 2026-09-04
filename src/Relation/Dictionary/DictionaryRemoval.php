@@ -12,6 +12,9 @@ use Prov\Model\ProvRelation;
 /**
  * The `after` dictionary was derived from the `before` dictionary by
  * removing the listed keys. Part of the PROV-DICT extension.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class DictionaryRemoval extends ProvRelation
 {

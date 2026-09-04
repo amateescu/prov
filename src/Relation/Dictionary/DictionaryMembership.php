@@ -11,6 +11,9 @@ use Prov\Model\ProvRelation;
 /**
  * Declares the key/entity pairs that a dictionary-typed entity contains.
  * Part of the PROV-DICT extension.
+ *
+ * Construct with named arguments; the positional order follows the PROV-N
+ * grammar (identifier first).
  */
 readonly class DictionaryMembership extends ProvRelation
 {
