@@ -13,7 +13,9 @@ use Prov\Exception\DeserializationException;
 use Prov\Identifier\ProvNamespace;
 use Prov\Model\ProvRelation;
 use Prov\Model\RelationMetadata;
+use Prov\Operation\DocumentComparator;
 use Prov\Operation\ProvGraph;
+use Prov\Prov;
 use Prov\Relation\Derivation;
 use Prov\Relation\DerivationSubtype;
 use Prov\Relation\Dictionary\DictionaryEntry;
@@ -105,14 +107,22 @@ final class JsonScannerTest extends TestCase
             . '}}}',
         );
 
-        // The common xsd types collapse to PHP scalars.
+        // Bare scalars stay scalar, while typed values keep their maps so the
+        // datatype is available to lossless consumers.
         $this->assertSame('plain', $scanner->attributeValue('entity', 'ex:e1', 'ex:title'));
-        $this->assertSame(42, $scanner->attributeValue('entity', 'ex:e1', 'ex:count'));
-        $this->assertSame(7, $scanner->attributeValue('entity', 'ex:e1', 'ex:padded'));
-        $this->assertSame(3.5, $scanner->attributeValue('entity', 'ex:e1', 'ex:ratio'));
-        $this->assertTrue($scanner->attributeValue('entity', 'ex:e1', 'ex:flag'));
-
-        // dateTime, QualifiedName references, and language-tagged literals stay raw.
+        $this->assertSame(['$' => '42', 'type' => 'xsd:int'], $scanner->attributeValue('entity', 'ex:e1', 'ex:count'));
+        $this->assertSame(
+            ['$' => '+007', 'type' => 'xsd:int'],
+            $scanner->attributeValue('entity', 'ex:e1', 'ex:padded'),
+        );
+        $this->assertSame(
+            ['$' => '3.5', 'type' => 'xsd:float'],
+            $scanner->attributeValue('entity', 'ex:e1', 'ex:ratio'),
+        );
+        $this->assertSame(
+            ['$' => 'true', 'type' => 'xsd:boolean'],
+            $scanner->attributeValue('entity', 'ex:e1', 'ex:flag'),
+        );
         $this->assertSame(
             ['$' => '2024-01-15T10:00:00Z', 'type' => 'xsd:dateTime'],
             $scanner->attributeValue('entity', 'ex:e1', 'ex:when'),
@@ -123,8 +133,7 @@ final class JsonScannerTest extends TestCase
         );
         $this->assertSame(['$' => 'bonjour', 'lang' => 'fr'], $scanner->attributeValue('entity', 'ex:e1', 'ex:label'));
 
-        // xsd integers are unbounded, so a value a PHP int cannot hold stays
-        // raw instead of being reported as the saturated PHP_INT_MAX.
+        // A value outside the PHP integer range also stays intact.
         $this->assertSame(
             ['$' => '99999999999999999999', 'type' => 'xsd:integer'],
             $scanner->attributeValue('entity', 'ex:e1', 'ex:huge'),
@@ -132,8 +141,97 @@ final class JsonScannerTest extends TestCase
 
         // Multi-valued attributes normalize element by element.
         $attributes = $scanner->attributesOf('entity', 'ex:e1');
-        $this->assertSame(['a', 'b', 7], $attributes['http://example.org/tags']);
+        $this->assertSame(['a', 'b', ['$' => '7', 'type' => 'xsd:int']], $attributes['http://example.org/tags']);
         $this->assertSame(['plain'], $attributes['http://example.org/title']);
+
+        // The typed slice reads reduce a value to text, an int or an instant,
+        // and give null instead of a value of another shape.
+        $this->assertSame('plain', $scanner->stringValue('entity', 'ex:e1', 'ex:title'));
+        $this->assertSame('true', $scanner->stringValue('entity', 'ex:e1', 'ex:flag'));
+        $this->assertSame('bonjour', $scanner->stringValue('entity', 'ex:e1', 'ex:label'));
+        $this->assertSame('2024-01-15T10:00:00Z', $scanner->stringValue('entity', 'ex:e1', 'ex:when'));
+        $this->assertNull($scanner->stringValue('entity', 'ex:e1', 'ex:missing'));
+        $this->assertSame(42, $scanner->intValue('entity', 'ex:e1', 'ex:count'));
+        $this->assertSame(7, $scanner->intValue('entity', 'ex:e1', 'ex:padded'));
+        $this->assertNull($scanner->intValue('entity', 'ex:e1', 'ex:ratio'));
+        $this->assertNull($scanner->intValue('entity', 'ex:e1', 'ex:flag'));
+        $this->assertNull($scanner->intValue('entity', 'ex:e1', 'ex:huge'));
+        $this->assertSame(
+            '2024-01-15T10:00:00+00:00',
+            $scanner->dateTimeValue('entity', 'ex:e1', 'ex:when')?->format(\DateTimeInterface::ATOM),
+        );
+        $this->assertNull($scanner->dateTimeValue('entity', 'ex:e1', 'ex:title'));
+    }
+
+    public function testAttributeBagMatchesDeserializedAttributes(): void
+    {
+        $json =
+            '{"prefix":{"ex":"http://example.org/","xsd":"http://www.w3.org/2001/XMLSchema#"},'
+            . '"entity":{"ex:e1":{'
+            . '"ex:title":"plain",'
+            . '"ex:count":{"$":"42","type":"xsd:int"},'
+            . '"ex:long":{"$":"42","type":"xsd:long"},'
+            . '"ex:integer":{"$":"42","type":"xsd:integer"},'
+            . '"ex:double":{"$":"3.5","type":"xsd:double"},'
+            . '"ex:uri":{"$":"https://example.com/value","type":"xsd:anyURI"},'
+            . '"ex:padded":{"$":"+007","type":"xsd:int"},'
+            . '"ex:when":{"$":"2024-01-15T10:00:00Z","type":"xsd:dateTime"},'
+            . '"ex:ref":{"$":"ex:other","type":"prov:QUALIFIED_NAME"},'
+            . '"ex:label":{"$":"bonjour","lang":"fr"},'
+            . '"ex:tags":["a","b"]'
+            . '}}}';
+        // The strict deserializer refuses the unresolvable reference the
+        // relation carries, so only the scanner reads the full document.
+        $scanner = new JsonScanner(
+            substr($json, 0, -1)
+            . ',"activity":{"ex:a1":{}},'
+            . '"used":{"ex:u1":{"prov:activity":"ex:a1","prov:entity":"ex:e1","ex:role":"input",'
+            . '"ex:rank":{"$":"42","type":"xsd:long"},'
+            . '"ex:broken":{"$":"nowhere:x","type":"prov:QUALIFIED_NAME"}}}}',
+        );
+
+        // The bag compares equal to the one Prov::deserialize() puts on the
+        // record: a reference is a QualifiedName, typed and tagged values are
+        // Literals, and the keys keep the document's prefix.
+        $bag = $scanner->attributeBag('entity', 'ex:e1');
+        $expected = Prov::deserialize($json)->getRecordByIdentifier($scanner->resolve('ex:e1'))?->attributes;
+        $this->assertTrue(DocumentComparator::equals(
+            Prov::documentBuilder()->namespace('ex', 'http://example.org/')->entity('ex:copy', $expected)->build(),
+            Prov::documentBuilder()->namespace('ex', 'http://example.org/')->entity('ex:copy', $bag)->build(),
+        ));
+        $this->assertSame(
+            [
+                'ex:title',
+                'ex:count',
+                'ex:long',
+                'ex:integer',
+                'ex:double',
+                'ex:uri',
+                'ex:padded',
+                'ex:when',
+                'ex:ref',
+                'ex:label',
+                'ex:tags',
+            ],
+            array_map('strval', $bag->keys()),
+        );
+        $long = $bag->firstValue($scanner->resolve('ex:long'));
+        $this->assertInstanceOf(Literal::class, $long);
+        $this->assertSame('http://www.w3.org/2001/XMLSchema#long', $long->datatype?->getUri());
+        $this->assertSame('http://example.org/other', $bag->firstValue($scanner->resolve('ex:ref'))?->getUri());
+        $this->assertSame('fr', $bag->firstValue($scanner->resolve('ex:label'))?->languageTag);
+        $this->assertSame(['a', 'b'], $bag->getScalars($scanner->resolve('ex:tags')));
+
+        // A relation's bag holds its annotations and not its endpoints, and a
+        // reference the document cannot resolve is dropped rather than kept as
+        // text.
+        $relation = $scanner->relations('used')[0];
+        $bag = $scanner->relationAttributeBag($relation);
+        $this->assertSame(['ex:role', 'ex:rank'], array_map('strval', $bag->keys()));
+        $this->assertSame('input', $bag->firstValue($scanner->resolve('ex:role')));
+        $rank = $bag->firstValue($scanner->resolve('ex:rank'));
+        $this->assertInstanceOf(Literal::class, $rank);
+        $this->assertSame('http://www.w3.org/2001/XMLSchema#long', $rank->datatype?->getUri());
     }
 
     public function testIdsIterateSectionInDocumentOrder(): void

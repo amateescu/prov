@@ -1211,17 +1211,11 @@ class JsonSerializer implements ProvSerializerInterface, ProvDeserializerInterfa
         if (!is_string($value)) {
             throw new DeserializationException('Invalid PROV-JSON: expected a dateTime string.');
         }
-        // An offset-less value would otherwise parse in the server's default
-        // timezone, making the document content depend on server configuration.
-        // UTC is a fixed default that keeps it deterministic. A value with its
-        // own offset or "Z" is unaffected; the constructor uses that offset.
-        // The zone is built once and reused across parses.
-        try {
-            static $utc = new \DateTimeZone('UTC');
-            return new \DateTimeImmutable($value, $utc);
-        } catch (\DateException $e) {
-            throw new DeserializationException("Invalid PROV-JSON: malformed dateTime '{$value}'.", previous: $e);
-        }
+        return (
+            Literal::parseDateTime($value) ?? throw new DeserializationException(
+                "Invalid PROV-JSON: malformed dateTime '{$value}'.",
+            )
+        );
     }
 
     private function deserializeTypedValue(array $value, NamespaceManager $nsManager): QualifiedName|Literal

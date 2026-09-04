@@ -476,17 +476,7 @@ class ProvNDeserializer implements ProvDeserializerInterface
      */
     private function parseDateTime(string $val): \DateTimeImmutable
     {
-        // An offset-less value (no explicit zone in $val) would otherwise parse
-        // in the server's default timezone, making the document content depend
-        // on server configuration. UTC is a fixed default that keeps it
-        // deterministic. A value with its own offset or "Z" is unaffected; the
-        // constructor uses that offset. The zone is built once and reused.
-        try {
-            static $utc = new \DateTimeZone('UTC');
-            return new \DateTimeImmutable($val, $utc);
-        } catch (\Exception) {
-            throw $this->err("Invalid xsd:dateTime value '{$val}'.");
-        }
+        return Literal::parseDateTime($val) ?? throw $this->err("Invalid xsd:dateTime value '{$val}'.");
     }
 
     /**

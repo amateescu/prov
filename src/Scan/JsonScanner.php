@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Prov\Scan;
 
+use Prov\Attribute\Attributes;
+use Prov\Attribute\Literal;
 use Prov\Attribute\ValueIdentity;
 use Prov\Exception\DeserializationException;
 use Prov\Exception\NamespaceException;
@@ -53,37 +55,10 @@ use Prov\Serializer\QualifiedNameEscaper;
  */
 final class JsonScanner
 {
-    private const string XSD_URI = 'http://www.w3.org/2001/XMLSchema#';
-
     private const string PROV_TYPE_URI = 'http://www.w3.org/ns/prov#type';
 
     /** The element sections, in PROV-JSON layout order. */
     private const array ELEMENT_SECTIONS = ['entity', 'activity', 'agent'];
-
-    /** xsd local parts that collapse to a PHP int. */
-    private const array INTEGER_TYPES = [
-        'int' => true,
-        'integer' => true,
-        'long' => true,
-        'short' => true,
-        'byte' => true,
-        'nonNegativeInteger' => true,
-        'nonPositiveInteger' => true,
-        'negativeInteger' => true,
-        'positiveInteger' => true,
-        'unsignedLong' => true,
-        'unsignedInt' => true,
-        'unsignedShort' => true,
-        'unsignedByte' => true,
-    ];
-
-    /** xsd local parts that collapse to the lexical PHP string. */
-    private const array STRING_TYPES = [
-        'string' => true,
-        'normalizedString' => true,
-        'token' => true,
-        'anyURI' => true,
-    ];
 
     /** @var array<array-key, mixed> The decoded document root. */
     private readonly array $json;
@@ -309,6 +284,150 @@ final class JsonScanner
             }
         }
         return null;
+    }
+
+    /**
+     * The first value of one attribute as text, or null when the record or the
+     * attribute is absent. A scalar is cast, so `true` reads as "1"; a typed
+     * or language-tagged value gives its lexical form. Use it where the
+     * consumer wants the text and would otherwise guard the mixed result of
+     * `attributeValue()` itself.
+     */
+    public function stringValue(string $section, QualifiedName|string $id, QualifiedName|string $attribute): ?string
+    {
+        $value = $this->lexicalValue($section, $id, $attribute);
+        return is_scalar($value) ? (string) $value : null;
+    }
+
+    /**
+     * The first value of one attribute as an integer, or null when it is
+     * absent or does not spell a whole number. An int is returned as is and a
+     * string of digits is converted; a float and a boolean are not integers
+     * here, so both give null.
+     */
+    public function intValue(string $section, QualifiedName|string $id, QualifiedName|string $attribute): ?int
+    {
+        $value = $this->lexicalValue($section, $id, $attribute);
+        if (is_int($value)) {
+            return $value;
+        }
+        return is_string($value) ? $this->integerValue($value) : null;
+    }
+
+    /**
+     * The first value of one attribute as an instant, or null when it is
+     * absent or not a date the deserializer would accept. A bare string and a
+     * typed `xsd:dateTime` object read alike, through `Literal::parseDateTime()`,
+     * so the instant matches what `Prov::deserialize()` reports for
+     * `prov:startTime`.
+     */
+    public function dateTimeValue(
+        string $section,
+        QualifiedName|string $id,
+        QualifiedName|string $attribute,
+    ): ?\DateTimeImmutable {
+        $value = $this->lexicalValue($section, $id, $attribute);
+        return is_string($value) ? Literal::parseDateTime($value) : null;
+    }
+
+    /**
+     * The first value of one attribute with a typed or language-tagged value
+     * reduced to its lexical form, for the typed slice reads.
+     *
+     * @return string|int|float|bool|null
+     */
+    private function lexicalValue(string $section, QualifiedName|string $id, QualifiedName|string $attribute): mixed
+    {
+        $value = $this->attributeValue($section, $id, $attribute);
+        if (is_array($value)) {
+            $value = $value['$'] ?? null;
+        }
+        return is_scalar($value) ? $value : null;
+    }
+
+    /**
+     * The attributes of one element record as an immutable bag, so a consumer
+     * that already reads `Attributes` off a `ProvRecord` reads a scanned record
+     * the same way. Keys keep the prefix the document spelled them with. A
+     * bare scalar stays a scalar, a value tagged as a qualified name becomes a
+     * QualifiedName, and any other typed or language-tagged value becomes a
+     * Literal. The bag compares equal to the deserialized record's under
+     * `DocumentComparator`. A reference whose prefix the document never
+     * declared is dropped.
+     *
+     * For a relation record this would include the formal endpoints, which
+     * are not attributes; use `relationAttributeBag()` there.
+     */
+    public function attributeBag(string $section, QualifiedName|string $id): Attributes
+    {
+        return $this->toAttributeBag($this->attributesOf($section, $id));
+    }
+
+    /**
+     * A scanned relation's non-formal attributes as an immutable bag, with the
+     * value mapping `attributeBag()` describes.
+     */
+    public function relationAttributeBag(ScannedRelation $relation): Attributes
+    {
+        return $this->toAttributeBag($relation->attributes);
+    }
+
+    /**
+     * Builds an Attributes bag from the scanner's normalized attribute shape.
+     *
+     * @param array<string, list<string|int|float|bool|array<string, mixed>>> $attributes
+     *   Normalized values keyed by the full URI of the attribute name.
+     */
+    private function toAttributeBag(array $attributes): Attributes
+    {
+        $data = [];
+        $keys = [];
+        foreach ($attributes as $uri => $values) {
+            foreach ($values as $value) {
+                $converted = $this->attributeBagValue($value);
+                if ($converted !== null) {
+                    $data[$uri][] = $converted;
+                }
+            }
+            if (!isset($data[$uri])) {
+                continue;
+            }
+            $key = $this->nsManager->resolveUri($uri);
+            if ($key !== null) {
+                $keys[$uri] = $key;
+            }
+        }
+        return new Attributes($data, $keys);
+    }
+
+    /**
+     * Maps one normalized value to the value type an Attributes bag holds, or
+     * null for a reference the document cannot resolve.
+     *
+     * @param string|int|float|bool|array<string, mixed> $value
+     *   One normalized value.
+     */
+    private function attributeBagValue(string|int|float|bool|array $value): QualifiedName|Literal|string|int|float|bool|null
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+        if ($this->isQualifiedNameValue($value)) {
+            return $this->resolveReference($value);
+        }
+        $lexical = $value['$'] ?? null;
+        if (!is_scalar($lexical)) {
+            return null;
+        }
+        $lang = $value['lang'] ?? null;
+        if (is_string($lang)) {
+            return new Literal((string) $lexical, languageTag: $lang);
+        }
+        $type = $value['type'] ?? null;
+        if (!is_string($type)) {
+            return $lexical;
+        }
+        return new Literal((string) $lexical, $this->tryResolve($type));
     }
 
     /**
@@ -933,12 +1052,11 @@ final class JsonScanner
     }
 
     /**
-     * Normalizes a single PROV-JSON value. A bare scalar stays as decoded. A
-     * typed-value object collapses to a PHP scalar for the common xsd types
-     * (string family, integer family, float/double, boolean); a
-     * language-tagged, `prov:QUALIFIED_NAME`, decimal, dateTime, or otherwise
-     * unrecognized typed value stays raw so nothing is lost. A malformed typed
-     * value (no scalar `$`) returns null so the caller can drop it.
+     * Normalizes a single PROV-JSON value. A bare scalar stays as decoded, and
+     * a typed or language-tagged value stays raw so its datatype or language
+     * is not lost. An object with only a string `$` member reduces to that
+     * untyped string. A malformed typed value (no scalar `$`) returns null so
+     * the caller can drop it.
      *
      * @return string|int|float|bool|array<string, mixed>|null
      */
@@ -955,42 +1073,12 @@ final class JsonScanner
         if (!is_scalar($lexical)) {
             return null;
         }
-        // A language tag makes it a language-tagged literal, not a plain scalar.
-        if (isset($raw['lang'])) {
+        // A type or language tag carries identity that scalar conversion would
+        // lose. The typed slice reads reduce its lexical value themselves.
+        if (isset($raw['type']) || isset($raw['lang'])) {
             return $raw;
         }
-
-        $type = $raw['type'] ?? null;
-        if ($type === null) {
-            return is_string($lexical) ? $lexical : $raw;
-        }
-        if (!is_string($type)) {
-            return $raw;
-        }
-
-        $local = $this->xsdLocalPart($type);
-        if ($local === null) {
-            return $raw;
-        }
-
-        $lexicalString = (string) $lexical;
-        if ($local === 'boolean') {
-            return match ($lexicalString) {
-                'true', '1' => true,
-                'false', '0' => false,
-                default => $raw,
-            };
-        }
-        if (isset(self::INTEGER_TYPES[$local])) {
-            return $this->integerValue($lexicalString) ?? $raw;
-        }
-        if ($local === 'float' || $local === 'double') {
-            return is_numeric($lexicalString) ? (float) $lexicalString : $raw;
-        }
-        if (isset(self::STRING_TYPES[$local])) {
-            return $lexicalString;
-        }
-        return $raw;
+        return is_string($lexical) ? $lexical : $raw;
     }
 
     /**
@@ -1020,21 +1108,6 @@ final class JsonScanner
             return '0';
         }
         return str_starts_with($lexical, '-') ? '-' . $digits : $digits;
-    }
-
-    /**
-     * The xsd local part of a datatype token (`xsd:int` -> `int`), or null when
-     * the token does not resolve into the XSD namespace. Tolerates the
-     * hash-less xsd namespace form some documents use.
-     */
-    private function xsdLocalPart(string $type): ?string
-    {
-        $qn = $this->tryResolve($type);
-        if ($qn === null) {
-            return null;
-        }
-        $uri = ValueIdentity::normalizeDatatypeUri($qn->getUri());
-        return str_starts_with($uri, self::XSD_URI) ? substr($uri, strlen(self::XSD_URI)) : null;
     }
 
     /**

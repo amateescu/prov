@@ -89,6 +89,26 @@ final class LiteralTest extends TestCase
         $this->assertSame('http://www.w3.org/2001/XMLSchema#dateTime', $lit->datatype->uri);
     }
 
+    public function testParseDateTime(): void
+    {
+        // Text with no offset is read in UTC; text with one keeps it.
+        $this->assertSame(
+            '2023-01-15T10:30:00+00:00',
+            Literal::parseDateTime('2023-01-15T10:30:00')?->format(\DateTimeInterface::ATOM),
+        );
+        $this->assertSame(
+            '2023-01-15T10:30:00+02:00',
+            Literal::parseDateTime('2023-01-15T10:30:00+02:00')?->format(\DateTimeInterface::ATOM),
+        );
+        $this->assertSame(
+            '2023-01-15T10:30:00.250000+00:00',
+            Literal::formatDateTime(Literal::parseDateTime('2023-01-15T10:30:00.25Z')),
+        );
+        // Unreadable text and empty text give null, never "now".
+        $this->assertNull(Literal::parseDateTime('not a date'));
+        $this->assertNull(Literal::parseDateTime(''));
+    }
+
     public function testFloatFactory(): void
     {
         $lit = Literal::float(3.14);

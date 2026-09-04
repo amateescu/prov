@@ -139,6 +139,30 @@ readonly class Literal implements \Stringable
         return $value->format($pattern);
     }
 
+    /**
+     * Parses an xsd:dateTime lexical string, the read side of formatDateTime().
+     * Returns null for text PHP cannot read as a date, and for empty text,
+     * which PHP would otherwise read as "now".
+     *
+     * A value with no offset is read in UTC, so the instant does not depend on
+     * the server's default timezone. A value with its own offset or "Z" keeps
+     * it. The deserializers and the scanner all read times through here, so
+     * they agree on the instant.
+     */
+    public static function parseDateTime(string $value): ?\DateTimeImmutable
+    {
+        if ($value === '') {
+            return null;
+        }
+        try {
+            // The zone is built once and reused across parses.
+            static $utc = new \DateTimeZone('UTC');
+            return new \DateTimeImmutable($value, $utc);
+        } catch (\DateException) {
+            return null;
+        }
+    }
+
     #[\Override]
     public function __toString(): string
     {

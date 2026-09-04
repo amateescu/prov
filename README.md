@@ -139,6 +139,29 @@ ProvGraph::referencedIdentifiers($relation);  // every endpoint of one relation
 
 The graph covers the container's own records; flatten a document first to query across bundle boundaries. For type-centric queries (`all Usage records`), `Document::getRecordsByType()` remains the right tool.
 
+### Scanning stored PROV-JSON
+
+`JsonScanner` answers slice queries straight off decoded PROV-JSON, without building the `Document` object graph, for the case where a stored document is large and a read wants a few facts from it. Identifiers and attribute names match by URI, so the prefix a document spelled them with does not matter:
+
+```php
+use Prov\Scan\JsonScanner;
+
+$scanner = new JsonScanner($json);
+
+$scanner->ids('entity');                                            // record ids of a section
+$scanner->attributeValue('entity', 'ex:article', 'dct:title');      // first value, as decoded
+$scanner->stringValue('activity', 'ex:writing', 'ex:note');         // ?string
+$scanner->intValue('activity', 'ex:writing', 'ex:exit_code');       // ?int
+$scanner->dateTimeValue('activity', 'ex:writing', 'prov:startTime'); // ?DateTimeImmutable
+$scanner->attributeBag('agent', 'ex:alice');                        // Attributes, as on the deserialized record
+$scanner->relations('used');                                        // ScannedRelation list: endpoints + attributes
+$scanner->relationAttributeBag($relation);                          // a relation's annotations as Attributes
+$scanner->relationsReferencing('ex:article');                       // every relation naming an identifier
+$scanner->agentsOf('ex:writing');                                   // agents, with their delegation chains
+```
+
+`attributeValue()` returns the value as decoded, so a `dateTime`, a language-tagged literal or a qualified-name reference comes back as its raw typed map; the typed reads and the bags apply the deserializer's mapping instead. Record-level damage is skipped, structural damage throws at construction. The scanner reads the top-level document only; deserialize to work across bundles.
+
 ## Validation
 
 ```php
