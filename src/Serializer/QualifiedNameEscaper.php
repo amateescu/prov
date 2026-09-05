@@ -51,10 +51,18 @@ final class QualifiedNameEscaper
      */
     public static function escape(string $local): string
     {
-        // Fast path: when the name carries none of the punctuation that could
-        // ever need escaping (and no backslash), a single C-level scan returns
-        // it untouched and skips the per-character loop. Common shape (`e123`).
-        if (strpbrk($local, self::ESCAPE_ALWAYS . '.-\\') === false) {
+        // Fast path: `.` and `-` only matter at the ends, so check those two
+        // positions directly and let a single C-level scan rule out the
+        // punctuation that is escaped anywhere (and the backslash). A UUID or a
+        // dotted config name then returns untouched instead of taking the
+        // per-character loop.
+        if (
+            $local !== ''
+            && $local[0] !== '.'
+            && $local[0] !== '-'
+            && $local[-1] !== '.'
+            && strpbrk($local, self::ESCAPE_ALWAYS . '\\') === false
+        ) {
             return $local;
         }
         $out = '';

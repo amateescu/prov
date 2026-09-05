@@ -152,6 +152,11 @@ class DocumentBuilder extends RecordBuilder
      */
     private static function standardizeBlankNodesApart(array $records, array $bundles): array
     {
+        // Only a bundle can collide with the document, so a document without
+        // bundles skips the label walk over its own records.
+        if ($bundles === []) {
+            return [];
+        }
         $taken = BlankNodes::labels($records);
         foreach ($bundles as $index => $bundle) {
             $labels = BlankNodes::labels($bundle->records);

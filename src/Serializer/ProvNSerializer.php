@@ -82,7 +82,6 @@ class ProvNSerializer implements ProvSerializerInterface
             throw new \InvalidArgumentException('Indentation must be a non-negative number of spaces.');
         }
         $this->indentPrefix = str_repeat(' ', $this->indentation);
-        $this->minter = new PrefixMinter(new NamespaceManager());
     }
 
     /**

@@ -63,10 +63,7 @@ class JsonLdSerializer implements ProvSerializerInterface
     public function __construct(
         public readonly bool $prettyPrint = false,
         public readonly bool $sortRecords = false,
-    ) {
-        $this->blankLabelMinter = new BlankLabelMinter(new Document([], [], []));
-        $this->minter = new PrefixMinter(new NamespaceManager());
-    }
+    ) {}
 
     /**
      * {@inheritdoc}

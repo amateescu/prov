@@ -80,21 +80,24 @@ final class OutputOrder
     {
         /** @var array<class-string, int> $relationRank */
         $relationRank = array_flip(array_keys(RelationMetadata::FORMALS));
-        usort($records, static function (ProvRecord $a, ProvRecord $b) use ($relationRank): int {
-            $rank = self::recordRank($a, $relationRank) <=> self::recordRank($b, $relationRank);
-            if ($rank !== 0) {
-                return $rank;
-            }
-            $uriA = $a->identifier?->getUri();
-            $uriB = $b->identifier?->getUri();
-            if ($uriA === null || $uriB === null) {
-                // Anonymous records follow identified ones; two anonymous records
-                // keep their original order.
-                return ($uriA === null ? 1 : 0) <=> ($uriB === null ? 1 : 0);
-            }
-            return strcmp($uriA, $uriB);
-        });
-        return $records;
+        // One string key per record, compared bytewise: a two-digit rank, then
+        // NUL and the URI for an identified record, or 0x01 for an anonymous
+        // one. NUL sorts before 0x01, so identified records come first within
+        // a rank, and asort() is stable, so anonymous records keep their
+        // relative order. Building the keys once is O(n).
+        $keys = [];
+        foreach ($records as $index => $record) {
+            $uri = $record->identifier?->getUri();
+            $keys[$index] = $uri === null
+                ? sprintf("%02d\x01", self::recordRank($record, $relationRank))
+                : sprintf("%02d\0%s", self::recordRank($record, $relationRank), $uri);
+        }
+        asort($keys, SORT_STRING);
+        $sorted = [];
+        foreach (array_keys($keys) as $index) {
+            $sorted[] = $records[$index];
+        }
+        return $sorted;
     }
 
     private static function namespaceRank(string $uri): int

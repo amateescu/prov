@@ -81,9 +81,7 @@ class XmlSerializer implements ProvSerializerInterface, ProvDeserializerInterfac
     public function __construct(
         public readonly bool $prettyPrint = true,
         public readonly bool $sortRecords = false,
-    ) {
-        $this->minter = new PrefixMinter(new NamespaceManager());
-    }
+    ) {}
 
     // ============================================================
     // Serialization

@@ -82,6 +82,23 @@ final class OutputOrderingTest extends TestCase
         $this->assertSame(['ex:e1', 'ex:e2', 'ex:e3'], array_keys($data['entity']));
     }
 
+    public function testSortRecordsPutsIdentifiedBeforeAnonymousAndKeepsAnonymousOrder(): void
+    {
+        $builder = new DocumentBuilder();
+        $builder->namespace('ex', 'http://example.org/');
+        $builder
+            ->entity('ex:e2', ['ex:n' => 1])
+            ->entity(null, ['ex:n' => 2])
+            ->entity('ex:e1', ['ex:n' => 3])
+            ->entity(null, ['ex:n' => 4]);
+
+        $data = json_decode(new JsonSerializer(sortRecords: true)->serialize($builder->build()), true);
+
+        $this->assertSame(['ex:e1', 'ex:e2', '_:b1', '_:b2'], array_keys($data['entity']));
+        $this->assertSame(2, $data['entity']['_:b1']['ex:n']);
+        $this->assertSame(4, $data['entity']['_:b2']['ex:n']);
+    }
+
     public function testSortRecordsGroupsRelationsByTypeInProvDmOrder(): void
     {
         $builder = new DocumentBuilder();

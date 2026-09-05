@@ -20,6 +20,10 @@ final class QualifiedNameEscaperTest extends TestCase
     public static function escapeProvider(): iterable
     {
         yield 'no punctuation' => ['plain', 'plain'];
+        yield 'empty' => ['', ''];
+        yield 'single dash' => ['-', '\\-'];
+        yield 'two dots' => ['..', '\\.\\.'];
+        yield 'uuid' => ['5f2c1c1e-9b3a-4c50-9d6d-6b7e1c4e0c8a', '5f2c1c1e-9b3a-4c50-9d6d-6b7e1c4e0c8a'];
         yield 'comma' => ['a,b', 'a\\,b'];
         yield 'brackets' => ['a[b]c', 'a\\[b\\]c'];
         yield 'parens and quote' => ["a'(b)", "a\\'\\(b\\)"];
@@ -32,6 +36,12 @@ final class QualifiedNameEscaperTest extends TestCase
         yield 'leading dash' => ['-x', '\\-x'];
         yield 'trailing dash is bare' => ['x-', 'x-'];
         yield 'all escapable' => ["='(),:;[].", "\\=\\'\\(\\)\\,\\:\\;\\[\\]\\."];
+    }
+
+    public function testEscapeRejectsBackslash(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        QualifiedNameEscaper::escape('a\\b');
     }
 
     #[DataProvider('escapeProvider')]
