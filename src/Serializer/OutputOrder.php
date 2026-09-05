@@ -84,7 +84,8 @@ final class OutputOrder
         // NUL and the URI for an identified record, or 0x01 for an anonymous
         // one. NUL sorts before 0x01, so identified records come first within
         // a rank, and asort() is stable, so anonymous records keep their
-        // relative order. Building the keys once is O(n).
+        // relative order. Building the keys once is O(n). Two digits hold the
+        // rank: it is bounded by the relation count, 21 today.
         $keys = [];
         foreach ($records as $index => $record) {
             $uri = $record->identifier?->getUri();

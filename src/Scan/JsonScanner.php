@@ -99,6 +99,9 @@ final class JsonScanner
     /** @var array<string, list<string>> Section name => its reference-typed formal PROV-JSON keys. */
     private array $refKeysCache = [];
 
+    /** @var array<string, list<ScannedRelation>> Section name => its relations, built on first read. */
+    private array $relationsCache = [];
+
     /**
      * The document's namespace table as `prefix => uri`. Includes the default
      * namespace (under the reserved `default` prefix) and the prov/xsd
@@ -440,13 +443,16 @@ final class JsonScanner
      */
     public function relations(string $section): array
     {
+        if (isset($this->relationsCache[$section])) {
+            return $this->relationsCache[$section];
+        }
         $out = [];
         foreach ($this->section($section) as $rawId => $raw) {
             foreach ($this->recordBodies($raw) as $body) {
                 $out[] = $this->buildRelation($section, (string) $rawId, $body);
             }
         }
-        return $out;
+        return $this->relationsCache[$section] = $out;
     }
 
     /**
