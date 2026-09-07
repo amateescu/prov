@@ -206,6 +206,37 @@ readonly class Attributes implements \Countable, \IteratorAggregate
     }
 
     /**
+     * Values for a key as text: a native scalar is cast and a Literal gives
+     * its lexical form, so a typed or language-tagged value reads the same as
+     * a bare one. A QualifiedName value is not text and is skipped.
+     *
+     * @return list<string>
+     */
+    public function getStrings(QualifiedName $key): array
+    {
+        $out = [];
+        foreach ($this->data[$key->getUri()] ?? [] as $value) {
+            if ($value instanceof Literal) {
+                $out[] = $value->value;
+            } elseif (is_bool($value)) {
+                $out[] = $value ? 'true' : 'false';
+            } elseif (is_scalar($value)) {
+                $out[] = (string) $value;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * The first text value for a key, with the mapping `getStrings()` uses,
+     * or null when the key holds no text value.
+     */
+    public function firstString(QualifiedName $key): ?string
+    {
+        return $this->getStrings($key)[0] ?? null;
+    }
+
+    /**
      * Whether any value is stored for the given key.
      */
     public function has(QualifiedName $key): bool

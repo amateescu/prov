@@ -156,6 +156,9 @@ final class JsonScannerTest extends TestCase
         $this->assertNull($scanner->intValue('entity', 'ex:e1', 'ex:ratio'));
         $this->assertNull($scanner->intValue('entity', 'ex:e1', 'ex:flag'));
         $this->assertNull($scanner->intValue('entity', 'ex:e1', 'ex:huge'));
+        $this->assertTrue($scanner->boolValue('entity', 'ex:e1', 'ex:flag'));
+        $this->assertNull($scanner->boolValue('entity', 'ex:e1', 'ex:title'));
+        $this->assertNull($scanner->boolValue('entity', 'ex:e1', 'ex:count'));
         $this->assertSame(
             '2024-01-15T10:00:00+00:00',
             $scanner->dateTimeValue('entity', 'ex:e1', 'ex:when')?->format(\DateTimeInterface::ATOM),
@@ -232,6 +235,32 @@ final class JsonScannerTest extends TestCase
         $rank = $bag->firstValue($scanner->resolve('ex:rank'));
         $this->assertInstanceOf(Literal::class, $rank);
         $this->assertSame('http://www.w3.org/2001/XMLSchema#long', $rank->datatype?->getUri());
+    }
+
+    public function testActivityBagLeavesTimestampsOut(): void
+    {
+        $json =
+            '{"prefix":{"ex":"http://example.org/"},'
+            . '"activity":{"ex:a1":{'
+            . '"prov:startTime":"2024-01-15T10:00:00Z",'
+            . '"prov:endTime":"2024-01-15T10:05:00Z",'
+            . '"ex:note":"n"'
+            . '}}}';
+        $scanner = new JsonScanner($json);
+
+        // The deserializer moves the two instants onto the Activity, so the
+        // bag compares equal to the record's attributes only without them.
+        $bag = $scanner->attributeBag('activity', 'ex:a1');
+        $this->assertSame(['ex:note'], array_map('strval', $bag->keys()));
+        $expected = Prov::deserialize($json)->getRecordByIdentifier($scanner->resolve('ex:a1'))?->attributes;
+        $this->assertTrue(DocumentComparator::equals(
+            Prov::documentBuilder()->namespace('ex', 'http://example.org/')->entity('ex:copy', $expected)->build(),
+            Prov::documentBuilder()->namespace('ex', 'http://example.org/')->entity('ex:copy', $bag)->build(),
+        ));
+        $this->assertSame(
+            '2024-01-15T10:00:00+00:00',
+            $scanner->dateTimeValue('activity', 'ex:a1', 'prov:startTime')?->format(\DateTimeInterface::ATOM),
+        );
     }
 
     public function testIdsIterateSectionInDocumentOrder(): void

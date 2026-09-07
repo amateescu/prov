@@ -201,6 +201,20 @@ final class AttributesTest extends TestCase
         $this->assertSame([1, 'three', true], $attrs->getScalars($key));
     }
 
+    public function testGetStringsReadsScalarsAndLiterals(): void
+    {
+        $key = $this->prov->qualifiedName('count');
+        $attrs = new Attributes()
+            ->with($key, 1)
+            ->with($key, \Prov\Attribute\Literal::int(2))
+            ->with($key, 'three')
+            ->with($key, true)
+            ->with($key, $this->prov->qualifiedName('other'));
+        $this->assertSame(['1', '2', 'three', 'true'], $attrs->getStrings($key));
+        $this->assertSame('1', $attrs->firstString($key));
+        $this->assertNull($attrs->firstString($this->prov->qualifiedName('missing')));
+    }
+
     public function testKeysReturnsQualifiedNameObjects(): void
     {
         $key1 = $this->prov->qualifiedName('type');

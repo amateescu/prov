@@ -57,6 +57,10 @@ final class JsonScanner
 {
     private const string PROV_TYPE_URI = 'http://www.w3.org/ns/prov#type';
 
+    private const string PROV_START_TIME_URI = 'http://www.w3.org/ns/prov#startTime';
+
+    private const string PROV_END_TIME_URI = 'http://www.w3.org/ns/prov#endTime';
+
     /** The element sections, in PROV-JSON layout order. */
     private const array ELEMENT_SECTIONS = ['entity', 'activity', 'agent'];
 
@@ -318,6 +322,25 @@ final class JsonScanner
     }
 
     /**
+     * The first value of one attribute as a boolean, or null when it is absent
+     * or does not spell one. A native boolean is returned as is; the xsd
+     * lexical forms `true`, `false`, `1` and `0` are converted, so a typed
+     * `xsd:boolean` and a bare boolean read alike.
+     */
+    public function boolValue(string $section, QualifiedName|string $id, QualifiedName|string $attribute): ?bool
+    {
+        $value = $this->lexicalValue($section, $id, $attribute);
+        if (is_bool($value)) {
+            return $value;
+        }
+        return match ($value) {
+            'true', '1', 1 => true,
+            'false', '0', 0 => false,
+            default => null,
+        };
+    }
+
+    /**
      * The first value of one attribute as an instant, or null when it is
      * absent or not a date the deserializer would accept. A bare string and a
      * typed `xsd:dateTime` object read alike, through `Literal::parseDateTime()`,
@@ -358,12 +381,20 @@ final class JsonScanner
      * `DocumentComparator`. A reference whose prefix the document never
      * declared is dropped.
      *
-     * For a relation record this would include the formal endpoints, which
-     * are not attributes; use `relationAttributeBag()` there.
+     * An activity's `prov:startTime` and `prov:endTime` are formal fields,
+     * not attributes, and are left out. For a relation record this would
+     * include the formal endpoints, which are not attributes; use
+     * `relationAttributeBag()` there.
      */
     public function attributeBag(string $section, QualifiedName|string $id): Attributes
     {
-        return $this->toAttributeBag($this->attributesOf($section, $id));
+        $attributes = $this->attributesOf($section, $id);
+        if ($section === 'activity') {
+            // The deserializer reads these into Activity::$startTime and
+            // Activity::$endTime and keeps them out of the record's attributes.
+            unset($attributes[self::PROV_START_TIME_URI], $attributes[self::PROV_END_TIME_URI]);
+        }
+        return $this->toAttributeBag($attributes);
     }
 
     /**
