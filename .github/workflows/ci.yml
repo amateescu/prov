@@ -35,14 +35,19 @@ jobs:
         with:
           dependency-versions: ${{ matrix.deps }}
 
+      # Mago runs through Composer, so its version follows composer.json
+      # instead of a separate image pin.
       - name: Mago format check
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.30.0 format --check
+        run: composer format:check
 
       - name: Mago lint
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.30.0 lint --reporting-format=github
+        run: composer lint -- --reporting-format=github
 
       - name: Mago analyze
-        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/carthage-software/mago:1.30.0 analyze --reporting-format=github
+        run: composer analyze -- --reporting-format=github
+
+      - name: Mago guard
+        run: composer guard
 
       - name: Tests
         run: composer test
